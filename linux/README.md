@@ -14,6 +14,7 @@ stable state and command boundary.
 - Terminal tab/surface layout creation, listing, closure, and snapshot persistence.
 - Safe managed-hook preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
+- GitHub PR/check state normalization through `gh`.
 - Ubuntu/Debian, Arch, and AppImage packaging skeletons.
 - CI-friendly checks through Makefile targets.
 
@@ -41,6 +42,7 @@ node linux/src/supacode-linux.mjs repo list
 node linux/src/supacode-linux.mjs worktree list --repo /path/to/repo
 node linux/src/supacode-linux.mjs worktree create --repo /path/to/repo --name task/example
 node linux/src/supacode-linux.mjs terminal create --worktree /path/to/worktree --command codex
+node linux/src/supacode-linux.mjs github pr sync --worktree /path/to/worktree
 node linux/src/supacode-linux.mjs agent status
 node linux/src/supacode-linux.mjs agent preview codex
 node linux/src/supacode-linux.mjs agent install copilot

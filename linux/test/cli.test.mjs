@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { normalizePullRequest } from "../src/github-status.mjs";
 import { spawnFile, spawnFileJSON } from "../src/utils.mjs";
 
 const cli = join(import.meta.dirname, "../src/supacode-linux.mjs");
@@ -17,10 +18,43 @@ test("initializes state database and reports status", async () => {
     assert.equal(status.repositories, 0);
     assert.equal(status.worktrees, 0);
     assert.equal(status.openTerminalSurfaces, 0);
+    assert.equal(status.pullRequests, 0);
     assert.equal(status.agentEvents, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("normalizes GitHub pull request check and merge readiness", () => {
+  const ready = normalizePullRequest({
+    number: 42,
+    title: "Add Linux core",
+    url: "https://github.com/example/repo/pull/42",
+    state: "OPEN",
+    headRefName: "linux-core",
+    baseRefName: "main",
+    isDraft: false,
+    reviewDecision: "APPROVED",
+    mergeStateStatus: "CLEAN",
+    statusCheckRollup: [
+      { name: "test", status: "COMPLETED", conclusion: "SUCCESS" },
+      { context: "lint", state: "SUCCESS" },
+    ],
+  });
+  assert.equal(ready.checksState, "passing");
+  assert.equal(ready.mergeReadiness, "ready");
+
+  const blocked = normalizePullRequest({
+    number: 43,
+    title: "Broken",
+    state: "OPEN",
+    isDraft: false,
+    reviewDecision: "REVIEW_REQUIRED",
+    mergeStateStatus: "CLEAN",
+    statusCheckRollup: [{ name: "test", status: "COMPLETED", conclusion: "FAILURE" }],
+  });
+  assert.equal(blocked.checksState, "failing");
+  assert.equal(blocked.mergeReadiness, "checks_failing");
 });
 
 test("previews, installs, tracks, and uninstalls managed Copilot hooks", async () => {

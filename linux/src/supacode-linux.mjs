@@ -11,6 +11,7 @@ import {
   supportedAgents,
   uninstallAgent,
 } from "./agent-integrations.mjs";
+import { normalizePullRequest, pullRequestFields } from "./github-status.mjs";
 import { spawnFile, spawnFileJSON, sqlString } from "./utils.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
@@ -43,6 +44,9 @@ async function main(argv) {
       case "terminal":
         await handleTerminal(subcommand, rest, dbPath);
         return;
+      case "github":
+        await handleGithub(subcommand, rest, dbPath);
+        return;
       case "agent":
         await handleAgent(subcommand, rest, dbPath);
         return;
@@ -70,6 +74,97 @@ async function main(argv) {
     console.error(error.message);
     process.exitCode = 1;
   }
+}
+
+async function handleGithub(subcommand, argv, dbPath) {
+  if (subcommand !== "pr") {
+    throw new UsageError("github requires pr");
+  }
+  const [prCommand, ...rest] = argv;
+  switch (prCommand) {
+    case "sync":
+      await syncPullRequest(rest, dbPath);
+      return;
+    case "list":
+      await listPullRequests(rest, dbPath);
+      return;
+    default:
+      throw new UsageError("github pr requires sync or list");
+  }
+}
+
+async function syncPullRequest(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.worktree) {
+    throw new UsageError("github pr sync requires --worktree");
+  }
+  await migrate(dbPath);
+  const worktree = await resolveWorktree(dbPath, options.worktree);
+  const args = ["pr", "view"];
+  if (options.number) {
+    args.push(options.number);
+  }
+  args.push("--json", pullRequestFields);
+  if (options.repo) {
+    args.push("--repo", options.repo);
+  }
+  const raw = await spawnFileJSON("gh", args, { cwd: worktree.workingDirectory });
+  const normalized = normalizePullRequest(raw);
+  await persistPullRequest(dbPath, worktree.id, normalized);
+  console.log(JSON.stringify({ worktreeID: worktree.id, ...withoutRaw(normalized) }, null, 2));
+}
+
+async function listPullRequests(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const worktree = options.worktree ? await resolveWorktree(dbPath, options.worktree) : null;
+  const where = worktree ? `WHERE worktree_id = ${sqlString(worktree.id)}` : "";
+  const rows = await querySQL(
+    dbPath,
+    `SELECT worktree_id AS worktreeID, number, title, url, state,
+            head_ref AS headRef, base_ref AS baseRef, is_draft AS isDraft,
+            review_decision AS reviewDecision, merge_state AS mergeState,
+            checks_state AS checksState, merge_readiness AS mergeReadiness,
+            updated_at AS updatedAt
+       FROM github_pull_requests
+       ${where}
+      ORDER BY updated_at DESC, number DESC;`
+  );
+  console.log(JSON.stringify(rows, null, 2));
+}
+
+async function persistPullRequest(dbPath, worktreeID, pr) {
+  await execSQL(
+    dbPath,
+    `INSERT INTO github_pull_requests(
+       worktree_id, number, title, url, state, head_ref, base_ref, is_draft,
+       review_decision, merge_state, checks_state, merge_readiness, raw_json, updated_at
+     )
+     VALUES (
+       ${sqlString(worktreeID)}, ${Number(pr.number)}, ${sqlString(pr.title)}, ${sqlString(pr.url)},
+       ${sqlString(pr.state)}, ${sqlString(pr.headRef)}, ${sqlString(pr.baseRef)}, ${pr.isDraft ? 1 : 0},
+       ${sqlString(pr.reviewDecision)}, ${sqlString(pr.mergeState)}, ${sqlString(pr.checksState)},
+       ${sqlString(pr.mergeReadiness)}, ${sqlString(JSON.stringify(pr.raw))}, unixepoch()
+     )
+     ON CONFLICT(worktree_id, number) DO UPDATE SET
+       title = excluded.title,
+       url = excluded.url,
+       state = excluded.state,
+       head_ref = excluded.head_ref,
+       base_ref = excluded.base_ref,
+       is_draft = excluded.is_draft,
+       review_decision = excluded.review_decision,
+       merge_state = excluded.merge_state,
+       checks_state = excluded.checks_state,
+       merge_readiness = excluded.merge_readiness,
+       raw_json = excluded.raw_json,
+       updated_at = excluded.updated_at;`
+  );
+}
+
+function withoutRaw(pr) {
+  const { raw, ...rest } = pr;
+  return rest;
 }
 
 async function handleAgent(subcommand, argv, dbPath) {
@@ -529,6 +624,7 @@ async function status(dbPath) {
   const [notificationCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM notifications WHERE is_read = 0;");
   const [agentEventCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM agent_events;");
   const [surfaceCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM terminal_surfaces WHERE is_closed = 0;");
+  const [pullRequestCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM github_pull_requests;");
   console.log(
     JSON.stringify(
       {
@@ -536,6 +632,7 @@ async function status(dbPath) {
         repositories: repoCount.count,
         worktrees: worktreeCount.count,
         openTerminalSurfaces: surfaceCount.count,
+        pullRequests: pullRequestCount.count,
         unreadNotifications: notificationCount.count,
         agentEvents: agentEventCount.count,
       },
@@ -694,6 +791,8 @@ function usage() {
   supacode-linux terminal create --worktree <worktree-id-or-path> [--title title] [--cwd path] [--command command]
   supacode-linux terminal list [--worktree <worktree-id-or-path>]
   supacode-linux terminal close --surface <surface-id>
+  supacode-linux github pr sync --worktree <worktree-id-or-path> [--number n] [--repo owner/name]
+  supacode-linux github pr list [--worktree <worktree-id-or-path>]
   supacode-linux agent list
   supacode-linux agent preview <agent> [--home path]
   supacode-linux agent status [agent] [--home path] [--db path]

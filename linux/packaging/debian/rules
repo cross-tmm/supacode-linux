@@ -11,7 +11,7 @@ case "${1:-}" in
   binary)
     mkdir -p debian/supacode-linux/usr/bin debian/supacode-linux/usr/lib/supacode-linux
     cp linux/packaging/bin/supacode-linux debian/supacode-linux/usr/bin/supacode-linux
-    cp linux/src/supacode-linux.mjs linux/src/utils.mjs linux/src/agent-integrations.mjs debian/supacode-linux/usr/lib/supacode-linux/
+    cp linux/src/supacode-linux.mjs linux/src/utils.mjs linux/src/agent-integrations.mjs linux/src/github-status.mjs debian/supacode-linux/usr/lib/supacode-linux/
     chmod 755 debian/supacode-linux/usr/bin/supacode-linux
     ;;
   *)
