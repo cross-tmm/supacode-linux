@@ -37,6 +37,9 @@ async function main(argv) {
         await migrate(dbPath);
         console.log(`initialized ${dbPath}`);
         return;
+      case "app":
+        await handleApp(subcommand, rest, dbPath);
+        return;
       case "repo":
         await handleRepo(subcommand, rest, dbPath);
         return;
@@ -51,6 +54,18 @@ async function main(argv) {
         return;
       case "agent":
         await handleAgent(subcommand, rest, dbPath);
+        return;
+      case "settings":
+        await handleSettings(subcommand, rest, dbPath);
+        return;
+      case "notification":
+        await handleNotification(subcommand, rest, dbPath);
+        return;
+      case "script":
+        await handleScript(subcommand, rest, dbPath);
+        return;
+      case "deeplink":
+        await handleDeeplink(subcommand, rest, dbPath);
         return;
       case "status":
         await status(dbPath);
@@ -76,6 +91,184 @@ async function main(argv) {
     console.error(error.message);
     process.exitCode = 1;
   }
+}
+
+async function handleApp(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "snapshot":
+      await appSnapshot(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("app requires snapshot");
+  }
+}
+
+async function appSnapshot(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  if (options.refresh === "true") {
+    await refreshRegisteredRepositories(dbPath);
+  }
+  const repositories = await querySQL(
+    dbPath,
+    `SELECT id, kind, root_path AS rootPath, COALESCE(remote_host, '') AS remoteHost,
+            display_name AS displayName, color, sort_order AS sortOrder,
+            added_at AS addedAt, last_opened_at AS lastOpenedAt
+       FROM repositories
+      ORDER BY sort_order, display_name, root_path;`
+  );
+  const worktrees = await querySQL(
+    dbPath,
+    `SELECT w.id, w.repository_id AS repositoryID, w.working_directory AS workingDirectory,
+            w.branch_name AS branchName, w.detail, w.is_attached AS isAttached,
+            w.is_missing AS isMissing, w.is_pinned AS isPinned, w.is_archived AS isArchived,
+            w.custom_title AS customTitle, w.color, w.sort_order AS sortOrder,
+            w.created_at AS createdAt, w.last_seen_at AS lastSeenAt, w.archived_at AS archivedAt,
+            r.kind AS repositoryKind, COALESCE(r.remote_host, '') AS remoteHost
+       FROM worktrees w
+       JOIN repositories r ON r.id = w.repository_id
+      ORDER BY w.is_archived, w.sort_order, w.branch_name, w.working_directory;`
+  );
+  const terminalTabs = await querySQL(
+    dbPath,
+    `SELECT id, worktree_id AS worktreeID, title, sort_order AS sortOrder,
+            selected_surface_id AS selectedSurfaceID, created_at AS createdAt,
+            updated_at AS updatedAt
+       FROM terminal_tabs
+      ORDER BY sort_order, created_at;`
+  );
+  const terminalSurfaces = (
+    await querySQL(
+      dbPath,
+      `SELECT id AS surfaceID, tab_id AS tabID, worktree_id AS worktreeID,
+              zmx_session_id AS zmxSessionID, title, working_directory AS workingDirectory,
+              split_parent_id AS splitParentID, split_direction AS splitDirection,
+              agent, task_status AS taskStatus, launch_command AS launchCommand,
+              launch_backend AS launchBackend, launch_plan_json AS launchPlanJSON,
+              is_closed AS isClosed, created_at AS createdAt, updated_at AS updatedAt
+         FROM terminal_surfaces
+        ORDER BY is_closed, updated_at DESC, created_at DESC;`
+    )
+  ).map(parseLaunchPlan);
+  const layouts = (
+    await querySQL(
+      dbPath,
+      `SELECT worktree_id AS worktreeID, layout_json AS layoutJSON, updated_at AS updatedAt
+         FROM terminal_layout_snapshots;`
+    )
+  ).map((row) => ({ ...row, layout: parseJSON(row.layoutJSON, {}) }));
+  const notifications = await notificationRows(dbPath, {});
+  const agents = await querySQL(
+    dbPath,
+    `SELECT agent, install_state AS installState, installed_hash AS installedHash,
+            last_checked_at AS lastCheckedAt, last_error AS lastError, updated_at AS updatedAt
+       FROM agent_integrations
+      ORDER BY agent;`
+  );
+  const pullRequests = await querySQL(
+    dbPath,
+    `SELECT worktree_id AS worktreeID, number, title, url, state,
+            head_ref AS headRef, base_ref AS baseRef, is_draft AS isDraft,
+            review_decision AS reviewDecision, merge_state AS mergeState,
+            checks_state AS checksState, merge_readiness AS mergeReadiness,
+            updated_at AS updatedAt
+       FROM github_pull_requests
+      ORDER BY updated_at DESC, number DESC;`
+  );
+  const scripts = await scriptRows(dbPath, {});
+  const runningScripts = await runningScriptRows(dbPath, {});
+  const settings = await settingsObject(dbPath);
+  const selectedWorktreeID = settings.selectedWorktreeID ?? null;
+  const snapshot = {
+    schemaVersion: 6,
+    generatedAt: Math.floor(Date.now() / 1000),
+    settings,
+    selectedWorktreeID,
+    repositories,
+    worktrees,
+    sidebar: sidebarSnapshot(repositories, worktrees, selectedWorktreeID),
+    terminalTabs,
+    terminalSurfaces,
+    layouts,
+    notifications,
+    agents,
+    pullRequests,
+    scripts,
+    runningScripts,
+    commandPaletteItems: commandPaletteItems(repositories, worktrees, scripts, runningScripts, selectedWorktreeID),
+  };
+  console.log(JSON.stringify(snapshot, null, 2));
+}
+
+function sidebarSnapshot(repositories, worktrees, selectedWorktreeID) {
+  const sections = [];
+  const activeWorktrees = worktrees.filter((worktree) => !truthy(worktree.isArchived));
+  const pinnedIDs = activeWorktrees.filter((worktree) => truthy(worktree.isPinned)).map((worktree) => worktree.id);
+  if (pinnedIDs.length > 0) {
+    sections.push({ kind: "highlight", id: "pinned", title: "Pinned", worktreeIDs: pinnedIDs });
+  }
+  for (const repo of repositories) {
+    const rows = activeWorktrees
+      .filter((worktree) => worktree.repositoryID === repo.id)
+      .map((worktree) => worktree.id);
+    sections.push({
+      kind: repo.kind === "remote" ? "remoteRepository" : "repository",
+      id: repo.id,
+      repositoryID: repo.id,
+      title: repo.displayName || basename(repo.rootPath),
+      color: repo.color,
+      worktreeIDs: rows,
+      selected: rows.includes(selectedWorktreeID),
+    });
+  }
+  const archivedIDs = worktrees.filter((worktree) => truthy(worktree.isArchived)).map((worktree) => worktree.id);
+  if (archivedIDs.length > 0) {
+    sections.push({ kind: "archived", id: "archived", title: "Archived Worktrees", worktreeIDs: archivedIDs });
+  }
+  return { sections, selectedWorktreeID };
+}
+
+function commandPaletteItems(repositories, worktrees, scripts, runningScripts, selectedWorktreeID) {
+  const items = [
+    { id: "global.openRepository", title: "Open Repository or Folder", kind: "openRepository", isGlobal: true },
+    { id: "global.addRemoteRepository", title: "Add Remote Repository", kind: "addRemoteRepository", isGlobal: true },
+    { id: "global.cloneRepository", title: "Clone Repository", kind: "cloneRepository", isGlobal: true },
+    { id: "global.newWorktree", title: "New Worktree", kind: "newWorktree", isGlobal: true },
+    { id: "global.refreshWorktrees", title: "Refresh Worktrees", kind: "refreshWorktrees", isGlobal: true },
+    { id: "global.archivedWorktrees", title: "View Archived Worktrees", kind: "viewArchivedWorktrees", isGlobal: true },
+    { id: "global.settings", title: "Open Settings", kind: "openSettings", isGlobal: true },
+  ];
+  const repoByID = new Map(repositories.map((repo) => [repo.id, repo]));
+  for (const worktree of worktrees) {
+    if (truthy(worktree.isArchived)) continue;
+    const repo = repoByID.get(worktree.repositoryID);
+    const repoName = repo?.displayName || basename(repo?.rootPath ?? "Repository");
+    const title = worktree.customTitle || worktree.branchName || basename(worktree.workingDirectory);
+    items.push({
+      id: `worktree.${worktree.id}`,
+      title: `${repoName} / ${title}`,
+      subtitle: worktree.workingDirectory,
+      kind: "selectWorktree",
+      worktreeID: worktree.id,
+      repositoryID: worktree.repositoryID,
+      isGlobal: false,
+    });
+  }
+  for (const script of scripts) {
+    const isRunning = runningScripts.some(
+      (running) => running.scriptID === script.id && !running.stoppedAt
+    );
+    items.push({
+      id: `script.${script.id}.${isRunning ? "stop" : "run"}`,
+      title: `${isRunning ? "Stop" : "Run"} ${script.name}`,
+      subtitle: script.scope === "global" ? "Global Script" : "Repository Script",
+      kind: isRunning ? "stopScript" : "runScript",
+      scriptID: script.id,
+      worktreeID: selectedWorktreeID,
+      isGlobal: false,
+    });
+  }
+  return items;
 }
 
 async function handleGithub(subcommand, argv, dbPath) {
@@ -237,12 +430,21 @@ async function createTerminal(argv, dbPath) {
     throw new UsageError("terminal create requires --worktree");
   }
   await migrate(dbPath);
-  const worktree = await resolveWorktree(dbPath, options.worktree);
+  const created = await createTerminalRecord(dbPath, {
+    worktree: await resolveWorktree(dbPath, options.worktree),
+    title: options.title,
+    cwd: options.cwd,
+    command: options.command,
+  });
+  console.log(JSON.stringify(created));
+}
+
+async function createTerminalRecord(dbPath, { worktree, title, cwd: rawCwd, command }) {
   const tabID = randomUUID();
   const surfaceID = randomUUID();
-  const title = options.title ?? worktree.branchName ?? basename(worktree.workingDirectory);
-  const cwd = cwdForWorktree(worktree, options.cwd);
-  const launchCommand = options.command ?? null;
+  const terminalTitle = title ?? worktree.branchName ?? basename(worktree.workingDirectory);
+  const cwd = cwdForWorktree(worktree, rawCwd);
+  const launchCommand = command ?? null;
   const launch = resolveTerminalLaunch({
     surfaceID,
     worktree,
@@ -253,7 +455,7 @@ async function createTerminal(argv, dbPath) {
   await execSQL(
     dbPath,
     `INSERT INTO terminal_tabs(id, worktree_id, title, sort_order, selected_surface_id)
-     VALUES (${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(title)}, 0, ${sqlString(surfaceID)});`
+     VALUES (${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(terminalTitle)}, 0, ${sqlString(surfaceID)});`
   );
   await execSQL(
     dbPath,
@@ -262,24 +464,23 @@ async function createTerminal(argv, dbPath) {
        launch_command, launch_backend, launch_plan_json, task_status
      )
      VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(launch.zmxSessionID)},
-             ${sqlString(title)}, ${sqlString(cwd)}, ${sqlString(launchCommand)},
+             ${sqlString(terminalTitle)}, ${sqlString(cwd)}, ${sqlString(launchCommand)},
              ${sqlString(launch.backend)}, ${sqlString(JSON.stringify(launch))}, 'idle');`
   );
   await saveLayoutSnapshot(dbPath, worktree.id);
-  console.log(
-    JSON.stringify({
-      worktreeID: worktree.id,
-      tabID,
-      surfaceID,
-      zmxSessionID: launch.zmxSessionID,
-      launch,
-      env: {
-        SUPACODE_WORKTREE_ID: worktree.id,
-        SUPACODE_TAB_ID: tabID,
-        SUPACODE_SURFACE_ID: surfaceID,
-      },
-    })
-  );
+  return {
+    worktreeID: worktree.id,
+    tabID,
+    surfaceID,
+    zmxSessionID: launch.zmxSessionID,
+    launch,
+    env: {
+      SUPACODE_REPO_ID: worktree.repositoryID,
+      SUPACODE_WORKTREE_ID: worktree.id,
+      SUPACODE_TAB_ID: tabID,
+      SUPACODE_SURFACE_ID: surfaceID,
+    },
+  };
 }
 
 async function listTerminals(argv, dbPath) {
@@ -393,7 +594,354 @@ async function recordAgentEvent(argv, dbPath) {
              ${sqlString(options.tab ?? "")}, ${sqlString(options.surface ?? "")},
              ${sqlString(JSON.stringify(payload))});`
   );
+  if (payload.notify) {
+    await createNotificationRecord(dbPath, {
+      worktreeID: options.worktree ?? null,
+      surfaceID: options.surface ?? null,
+      title: agentEventTitle(agent, event),
+      body: options.body ?? "",
+    });
+  }
   console.log(JSON.stringify({ agent, event, recorded: true }));
+}
+
+async function handleSettings(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case undefined:
+    case "list":
+      await listSettings(dbPath);
+      return;
+    case "get":
+      await getSetting(argv, dbPath);
+      return;
+    case "set":
+      await setSetting(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("settings requires list, get, or set");
+  }
+}
+
+async function listSettings(dbPath) {
+  await migrate(dbPath);
+  console.log(JSON.stringify(await settingsObject(dbPath), null, 2));
+}
+
+async function getSetting(argv, dbPath) {
+  const options = parseOptions(argv);
+  const key = options._[0];
+  if (!key) {
+    throw new UsageError("settings get requires a key");
+  }
+  await migrate(dbPath);
+  const settings = await settingsObject(dbPath);
+  console.log(JSON.stringify({ key, value: settings[key] ?? null }, null, 2));
+}
+
+async function setSetting(argv, dbPath) {
+  const options = parseOptions(argv);
+  const [key, rawValue] = options._;
+  if (!key) {
+    throw new UsageError("settings set requires a key");
+  }
+  if (rawValue === undefined) {
+    throw new UsageError("settings set requires a JSON value");
+  }
+  await migrate(dbPath);
+  const value = parseJSON(rawValue, rawValue);
+  await setSettingValue(dbPath, key, value);
+  console.log(JSON.stringify({ key, value }, null, 2));
+}
+
+async function handleNotification(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "list":
+      await listNotifications(argv, dbPath);
+      return;
+    case "create":
+      await createNotification(argv, dbPath);
+      return;
+    case "read":
+      await markNotificationRead(argv, dbPath);
+      return;
+    case "dismiss":
+      await dismissNotification(argv, dbPath);
+      return;
+    case "dismiss-all":
+      await dismissAllNotifications(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("notification requires list, create, read, dismiss, or dismiss-all");
+  }
+}
+
+async function listNotifications(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  console.log(
+    JSON.stringify(
+      await notificationRows(dbPath, {
+        worktreeID: options.worktree,
+        unreadOnly: options.unread === "true",
+        includeDismissed: options.dismissed === "true",
+      }),
+      null,
+      2
+    )
+  );
+}
+
+async function createNotification(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.title) {
+    throw new UsageError("notification create requires --title");
+  }
+  await migrate(dbPath);
+  const notification = await createNotificationRecord(dbPath, {
+    worktreeID: options.worktree ?? null,
+    surfaceID: options.surface ?? null,
+    title: options.title,
+    body: options.body ?? "",
+  });
+  console.log(JSON.stringify(notification, null, 2));
+}
+
+async function markNotificationRead(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.id) {
+    throw new UsageError("notification read requires --id");
+  }
+  await migrate(dbPath);
+  await execSQL(
+    dbPath,
+    `UPDATE notifications SET is_read = 1 WHERE id = ${sqlString(options.id)};`
+  );
+  console.log(JSON.stringify({ id: options.id, isRead: true }));
+}
+
+async function dismissNotification(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.id) {
+    throw new UsageError("notification dismiss requires --id");
+  }
+  await migrate(dbPath);
+  await execSQL(
+    dbPath,
+    `UPDATE notifications
+        SET is_dismissed = 1, dismissed_at = unixepoch(), is_read = 1
+      WHERE id = ${sqlString(options.id)};`
+  );
+  console.log(JSON.stringify({ id: options.id, isDismissed: true }));
+}
+
+async function dismissAllNotifications(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const where = options.worktree ? `AND worktree_id = ${sqlString(options.worktree)}` : "";
+  await execSQL(
+    dbPath,
+    `UPDATE notifications
+        SET is_dismissed = 1, dismissed_at = unixepoch(), is_read = 1
+      WHERE is_dismissed = 0 ${where};`
+  );
+  console.log(JSON.stringify({ dismissed: true, worktreeID: options.worktree ?? null }));
+}
+
+async function handleScript(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "list":
+      await listScripts(argv, dbPath);
+      return;
+    case "save":
+      await saveScript(argv, dbPath);
+      return;
+    case "delete":
+      await deleteScript(argv, dbPath);
+      return;
+    case "run":
+      await runScript(argv, dbPath);
+      return;
+    case "stop":
+      await stopScript(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("script requires list, save, delete, run, or stop");
+  }
+}
+
+async function listScripts(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  console.log(
+    JSON.stringify(
+      await scriptRows(dbPath, {
+        repositoryID: options.repo,
+        includeGlobal: options.global !== "false",
+      }),
+      null,
+      2
+    )
+  );
+}
+
+async function saveScript(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.name) {
+    throw new UsageError("script save requires --name");
+  }
+  if (!options.command) {
+    throw new UsageError("script save requires --command");
+  }
+  const id = options.id ?? randomUUID();
+  const scope = options.repo ? "repository" : options.scope ?? "global";
+  if (!["global", "repository"].includes(scope)) {
+    throw new UsageError("script --scope must be global or repository");
+  }
+  if (scope === "repository" && !options.repo) {
+    throw new UsageError("repository scripts require --repo");
+  }
+  const kind = options.kind ?? "custom";
+  if (!["custom", "run", "setup", "archive", "delete"].includes(kind)) {
+    throw new UsageError("script --kind must be custom, run, setup, archive, or delete");
+  }
+  await migrate(dbPath);
+  await execSQL(
+    dbPath,
+    `INSERT INTO scripts(id, scope, repository_id, kind, name, color, command, sort_order, is_enabled, updated_at)
+     VALUES (${sqlString(id)}, ${sqlString(scope)}, ${sqlString(options.repo ?? null)}, ${sqlString(kind)},
+             ${sqlString(options.name)}, ${sqlString(options.color ?? null)}, ${sqlString(options.command)},
+             ${Number(options.order ?? 0)}, ${options.enabled === "false" ? 0 : 1}, unixepoch())
+     ON CONFLICT(id) DO UPDATE SET
+       scope = excluded.scope,
+       repository_id = excluded.repository_id,
+       kind = excluded.kind,
+       name = excluded.name,
+       color = excluded.color,
+       command = excluded.command,
+       sort_order = excluded.sort_order,
+       is_enabled = excluded.is_enabled,
+       updated_at = excluded.updated_at;`
+  );
+  console.log(JSON.stringify((await scriptRows(dbPath, { id }))[0], null, 2));
+}
+
+async function deleteScript(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.id) {
+    throw new UsageError("script delete requires --id");
+  }
+  await migrate(dbPath);
+  await execSQL(dbPath, `DELETE FROM scripts WHERE id = ${sqlString(options.id)};`);
+  console.log(JSON.stringify({ id: options.id, deleted: true }));
+}
+
+async function runScript(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.id) {
+    throw new UsageError("script run requires --id");
+  }
+  if (!options.worktree) {
+    throw new UsageError("script run requires --worktree");
+  }
+  await migrate(dbPath);
+  const script = (await scriptRows(dbPath, { id: options.id }))[0];
+  if (!script) {
+    throw new UsageError(`script not found: ${options.id}`);
+  }
+  if (!truthy(script.isEnabled)) {
+    throw new UsageError(`script is disabled: ${options.id}`);
+  }
+  const terminal = await createTerminalRecord(dbPath, {
+    worktree: await resolveWorktree(dbPath, options.worktree),
+    title: script.name,
+    command: script.command,
+    cwd: options.cwd,
+  });
+  const runningID = randomUUID();
+  await execSQL(
+    dbPath,
+    `INSERT INTO running_scripts(id, script_id, worktree_id, terminal_surface_id)
+     VALUES (${sqlString(runningID)}, ${sqlString(script.id)}, ${sqlString(terminal.worktreeID)},
+             ${sqlString(terminal.surfaceID)});`
+  );
+  console.log(JSON.stringify({ id: runningID, script, terminal }, null, 2));
+}
+
+async function stopScript(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.id) {
+    throw new UsageError("script stop requires --id");
+  }
+  await migrate(dbPath);
+  const worktreeWhere = options.worktree ? `AND worktree_id = ${sqlString(options.worktree)}` : "";
+  const rows = await querySQL(
+    dbPath,
+    `SELECT id, terminal_surface_id AS terminalSurfaceID
+       FROM running_scripts
+      WHERE script_id = ${sqlString(options.id)}
+        AND stopped_at IS NULL
+        ${worktreeWhere};`
+  );
+  await execSQL(
+    dbPath,
+    `UPDATE running_scripts
+        SET stopped_at = unixepoch()
+      WHERE script_id = ${sqlString(options.id)}
+        AND stopped_at IS NULL
+        ${worktreeWhere};`
+  );
+  for (const row of rows) {
+    if (!row.terminalSurfaceID) continue;
+    await execSQL(
+      dbPath,
+      `UPDATE terminal_surfaces
+          SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+        WHERE id = ${sqlString(row.terminalSurfaceID)};`
+    );
+  }
+  console.log(JSON.stringify({ scriptID: options.id, stopped: rows.length }));
+}
+
+async function handleDeeplink(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "parse":
+      await parseDeeplinkCommand(argv, dbPath);
+      return;
+    case "run":
+      await runDeeplinkCommand(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("deeplink requires parse or run");
+  }
+}
+
+async function parseDeeplinkCommand(argv, dbPath) {
+  const options = parseOptions(argv);
+  const url = options._[0] ?? options.url;
+  if (!url) {
+    throw new UsageError("deeplink parse requires a URL");
+  }
+  await migrate(dbPath);
+  console.log(JSON.stringify(parseDeeplink(url), null, 2));
+}
+
+async function runDeeplinkCommand(argv, dbPath) {
+  const options = parseOptions(argv);
+  const url = options._[0] ?? options.url;
+  if (!url) {
+    throw new UsageError("deeplink run requires a URL");
+  }
+  await migrate(dbPath);
+  const parsed = parseDeeplink(url);
+  const allowUnconfirmed =
+    options.allowUnconfirmed === "true" ||
+    (await getSettingValue(dbPath, "deeplink.allowArbitraryActions")) === true;
+  if (parsed.requiresConfirmation && !allowUnconfirmed) {
+    console.log(JSON.stringify({ ...parsed, executed: false, confirmationRequired: true }, null, 2));
+    return;
+  }
+  const result = await executeDeeplink(dbPath, parsed);
+  console.log(JSON.stringify({ ...parsed, executed: true, result }, null, 2));
 }
 
 function requireAgent(agent) {
@@ -536,8 +1084,24 @@ async function handleWorktree(subcommand, argv, dbPath) {
     case "create":
       await createWorktree(argv, dbPath);
       return;
+    case "archive":
+      await setWorktreeArchive(argv, dbPath, true);
+      return;
+    case "unarchive":
+      await setWorktreeArchive(argv, dbPath, false);
+      return;
+    case "pin":
+      await setWorktreePin(argv, dbPath, true);
+      return;
+    case "unpin":
+      await setWorktreePin(argv, dbPath, false);
+      return;
+    case "customize":
+    case "appearance":
+      await customizeWorktree(argv, dbPath);
+      return;
     default:
-      throw new UsageError("worktree requires list or create");
+      throw new UsageError("worktree requires list, create, archive, unarchive, pin, unpin, or customize");
   }
 }
 
@@ -579,6 +1143,78 @@ async function createWorktree(argv, dbPath) {
   }
   await refreshWorktrees(dbPath, repo);
   console.log(JSON.stringify({ repositoryID: repo.id, branchName: name, workingDirectory: worktreePath }));
+}
+
+async function setWorktreeArchive(argv, dbPath, archived) {
+  const options = parseOptions(argv);
+  const rawWorktree = options.worktree ?? options._[0];
+  if (!rawWorktree) {
+    throw new UsageError(`worktree ${archived ? "archive" : "unarchive"} requires a worktree id or --worktree`);
+  }
+  await migrate(dbPath);
+  const worktree = await resolveWorktree(dbPath, rawWorktree);
+  await execSQL(
+    dbPath,
+    `UPDATE worktrees
+        SET is_archived = ${archived ? 1 : 0},
+            archived_at = ${archived ? "unixepoch()" : "NULL"}
+      WHERE id = ${sqlString(worktree.id)};`
+  );
+  console.log(JSON.stringify({ worktreeID: worktree.id, isArchived: archived }));
+}
+
+async function setWorktreePin(argv, dbPath, pinned) {
+  const options = parseOptions(argv);
+  const rawWorktree = options.worktree ?? options._[0];
+  if (!rawWorktree) {
+    throw new UsageError(`worktree ${pinned ? "pin" : "unpin"} requires a worktree id or --worktree`);
+  }
+  await migrate(dbPath);
+  const worktree = await resolveWorktree(dbPath, rawWorktree);
+  await execSQL(
+    dbPath,
+    `UPDATE worktrees
+        SET is_pinned = ${pinned ? 1 : 0}
+      WHERE id = ${sqlString(worktree.id)};`
+  );
+  console.log(JSON.stringify({ worktreeID: worktree.id, isPinned: pinned }));
+}
+
+async function customizeWorktree(argv, dbPath) {
+  const options = parseOptions(argv);
+  const rawWorktree = options.worktree ?? options._[0];
+  if (!rawWorktree) {
+    throw new UsageError("worktree customize requires a worktree id or --worktree");
+  }
+  await migrate(dbPath);
+  const worktree = await resolveWorktree(dbPath, rawWorktree);
+  const hasTitle = Object.hasOwn(options, "title");
+  const hasColor = Object.hasOwn(options, "color");
+  if (!hasTitle && !hasColor) {
+    const rows = await querySQL(
+      dbPath,
+      `SELECT id AS worktreeID, custom_title AS customTitle, color,
+              COALESCE(custom_title, branch_name, working_directory) AS displayTitle
+         FROM worktrees
+        WHERE id = ${sqlString(worktree.id)}
+        LIMIT 1;`
+    );
+    console.log(JSON.stringify(rows[0] ?? null, null, 2));
+    return;
+  }
+  const assignments = [];
+  if (hasTitle) assignments.push(`custom_title = ${sqlString(options.title === "" ? null : options.title)}`);
+  if (hasColor) assignments.push(`color = ${sqlString(options.color === "none" ? null : options.color)}`);
+  await execSQL(dbPath, `UPDATE worktrees SET ${assignments.join(", ")} WHERE id = ${sqlString(worktree.id)};`);
+  const rows = await querySQL(
+    dbPath,
+    `SELECT id AS worktreeID, custom_title AS customTitle, color,
+            COALESCE(custom_title, branch_name, working_directory) AS displayTitle
+       FROM worktrees
+      WHERE id = ${sqlString(worktree.id)}
+      LIMIT 1;`
+  );
+  console.log(JSON.stringify(rows[0], null, 2));
 }
 
 async function resolveRepo(dbPath, rawRepo) {
@@ -630,7 +1266,8 @@ async function resolveRepo(dbPath, rawRepo) {
 async function resolveWorktree(dbPath, rawWorktree) {
   const byID = await querySQL(
     dbPath,
-    `SELECT w.id, w.working_directory AS workingDirectory, w.branch_name AS branchName,
+    `SELECT w.id, w.repository_id AS repositoryID,
+            w.working_directory AS workingDirectory, w.branch_name AS branchName,
             r.kind AS repositoryKind, r.root_path AS repositoryRootPath,
             COALESCE(r.remote_host, '') AS remoteHost
        FROM worktrees w
@@ -645,7 +1282,8 @@ async function resolveWorktree(dbPath, rawWorktree) {
   const path = resolve(rawWorktree);
   const byPath = await querySQL(
     dbPath,
-    `SELECT w.id, w.working_directory AS workingDirectory, w.branch_name AS branchName,
+    `SELECT w.id, w.repository_id AS repositoryID,
+            w.working_directory AS workingDirectory, w.branch_name AS branchName,
             r.kind AS repositoryKind, r.root_path AS repositoryRootPath,
             COALESCE(r.remote_host, '') AS remoteHost
        FROM worktrees w
@@ -684,6 +1322,18 @@ async function refreshWorktrees(dbPath, repo) {
   }
 }
 
+async function refreshRegisteredRepositories(dbPath) {
+  const repos = await querySQL(
+    dbPath,
+    `SELECT id, kind, root_path AS rootPath, COALESCE(remote_host, '') AS remoteHost
+       FROM repositories
+      ORDER BY sort_order, added_at;`
+  );
+  for (const repo of repos) {
+    await refreshWorktrees(dbPath, repo);
+  }
+}
+
 function parseWorktreePorcelain(output) {
   return output
     .trim()
@@ -711,6 +1361,298 @@ function parseWorktreePorcelain(output) {
       }
       return [entry];
     });
+}
+
+async function settingsObject(dbPath) {
+  const rows = await querySQL(dbPath, "SELECT key, value_json AS valueJSON FROM app_settings ORDER BY key;");
+  return Object.fromEntries(rows.map((row) => [row.key, parseJSON(row.valueJSON, null)]));
+}
+
+async function getSettingValue(dbPath, key) {
+  const rows = await querySQL(
+    dbPath,
+    `SELECT value_json AS valueJSON
+       FROM app_settings
+      WHERE key = ${sqlString(key)}
+      LIMIT 1;`
+  );
+  return rows.length === 0 ? null : parseJSON(rows[0].valueJSON, null);
+}
+
+async function setSettingValue(dbPath, key, value) {
+  await execSQL(
+    dbPath,
+    `INSERT INTO app_settings(key, value_json, updated_at)
+     VALUES (${sqlString(key)}, ${sqlString(JSON.stringify(value))}, unixepoch())
+     ON CONFLICT(key) DO UPDATE SET
+       value_json = excluded.value_json,
+       updated_at = excluded.updated_at;`
+  );
+}
+
+async function notificationRows(dbPath, { worktreeID, unreadOnly = false, includeDismissed = false }) {
+  const clauses = [];
+  if (worktreeID) clauses.push(`worktree_id = ${sqlString(worktreeID)}`);
+  if (unreadOnly) clauses.push("is_read = 0");
+  if (!includeDismissed) clauses.push("is_dismissed = 0");
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  return querySQL(
+    dbPath,
+    `SELECT id, worktree_id AS worktreeID, surface_id AS surfaceID, title, body,
+            is_read AS isRead, is_dismissed AS isDismissed,
+            created_at AS createdAt, dismissed_at AS dismissedAt
+       FROM notifications
+       ${where}
+      ORDER BY is_read, created_at DESC;`
+  );
+}
+
+async function createNotificationRecord(dbPath, { worktreeID, surfaceID, title, body }) {
+  const id = randomUUID();
+  await execSQL(
+    dbPath,
+    `INSERT INTO notifications(id, worktree_id, surface_id, title, body)
+     VALUES (${sqlString(id)}, ${sqlString(worktreeID)}, ${sqlString(surfaceID)},
+             ${sqlString(title)}, ${sqlString(body ?? "")});`
+  );
+  return (await notificationRows(dbPath, { includeDismissed: true })).find((row) => row.id === id);
+}
+
+function agentEventTitle(agent, event) {
+  const agentName = agent[0].toUpperCase() + agent.slice(1);
+  switch (event) {
+    case "awaiting_input":
+      return `${agentName} is awaiting input`;
+    case "busy":
+      return `${agentName} is working`;
+    case "session_start":
+      return `${agentName} session started`;
+    case "session_end":
+      return `${agentName} session ended`;
+    case "idle":
+      return `${agentName} is idle`;
+    default:
+      return `${agentName} update`;
+  }
+}
+
+async function scriptRows(dbPath, { id, repositoryID, includeGlobal = true }) {
+  const clauses = [];
+  if (id) {
+    clauses.push(`id = ${sqlString(id)}`);
+  } else if (repositoryID) {
+    const repoClause = `scope = 'repository' AND repository_id = ${sqlString(repositoryID)}`;
+    clauses.push(includeGlobal ? `(${repoClause} OR scope = 'global')` : repoClause);
+  } else if (!includeGlobal) {
+    clauses.push("scope != 'global'");
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  return querySQL(
+    dbPath,
+    `SELECT id, scope, repository_id AS repositoryID, kind, name, color, command,
+            sort_order AS sortOrder, is_enabled AS isEnabled,
+            created_at AS createdAt, updated_at AS updatedAt
+       FROM scripts
+       ${where}
+      ORDER BY scope, sort_order, name;`
+  );
+}
+
+async function runningScriptRows(dbPath, { worktreeID, scriptID }) {
+  const clauses = [];
+  if (worktreeID) clauses.push(`worktree_id = ${sqlString(worktreeID)}`);
+  if (scriptID) clauses.push(`script_id = ${sqlString(scriptID)}`);
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  return querySQL(
+    dbPath,
+    `SELECT id, script_id AS scriptID, worktree_id AS worktreeID,
+            terminal_surface_id AS terminalSurfaceID,
+            started_at AS startedAt, stopped_at AS stoppedAt
+       FROM running_scripts
+       ${where}
+      ORDER BY stopped_at, started_at DESC;`
+  );
+}
+
+function parseDeeplink(rawURL) {
+  let url;
+  try {
+    url = new URL(rawURL);
+  } catch (error) {
+    throw new UsageError(`invalid deeplink URL: ${rawURL}`);
+  }
+  if (url.protocol !== "supacode:") {
+    throw new UsageError("deeplink URL must use supacode://");
+  }
+  const host = url.hostname;
+  const pathSegments = url.pathname.split("/").filter(Boolean);
+  const query = Object.fromEntries(url.searchParams.entries());
+  if (!host) {
+    return { url: rawURL, kind: "open", requiresConfirmation: false };
+  }
+  if (host === "help") {
+    return { url: rawURL, kind: "help", requiresConfirmation: false };
+  }
+  if (host === "settings") {
+    if (pathSegments[0] === "repo" && pathSegments[1]) {
+      return {
+        url: rawURL,
+        kind: pathSegments[2] === "scripts" ? "settingsRepoScripts" : "settingsRepo",
+        repositoryID: decodeURIComponent(pathSegments[1]),
+        requiresConfirmation: false,
+      };
+    }
+    return {
+      url: rawURL,
+      kind: "settings",
+      section: pathSegments[0] ?? null,
+      requiresConfirmation: false,
+    };
+  }
+  if (host === "repo") {
+    if (pathSegments[0] === "open") {
+      if (!query.path?.startsWith("/")) {
+        throw new UsageError("repo open deeplink requires absolute path query");
+      }
+      return { url: rawURL, kind: "repoOpen", path: query.path, requiresConfirmation: false };
+    }
+    if (pathSegments[0] && pathSegments[1] === "worktree" && pathSegments[2] === "new") {
+      return {
+        url: rawURL,
+        kind: "repoWorktreeNew",
+        repositoryID: decodeURIComponent(pathSegments[0]),
+        branch: query.branch ?? null,
+        baseRef: query.base ?? null,
+        fetchOrigin: query.fetch === "true",
+        worktreeName: query.name ?? null,
+        worktreePath: query.location ?? null,
+        requiresConfirmation: true,
+      };
+    }
+  }
+  if (host === "worktree") {
+    if (!pathSegments[0]) {
+      throw new UsageError("worktree deeplink requires worktree id");
+    }
+    const worktreeID = decodeURIComponent(pathSegments[0]).replace(/\/$/, "");
+    const action = pathSegments[1] ?? "select";
+    if (action === "appearance") {
+      return {
+        url: rawURL,
+        kind: "worktreeAppearance",
+        worktreeID,
+        title: Object.hasOwn(query, "title") ? query.title : undefined,
+        color: Object.hasOwn(query, "color") ? query.color : undefined,
+        requiresConfirmation: true,
+      };
+    }
+    if (action === "script" && pathSegments[2] && pathSegments[3]) {
+      return {
+        url: rawURL,
+        kind: pathSegments[3] === "stop" ? "stopScript" : "runScript",
+        worktreeID,
+        scriptID: pathSegments[2],
+        requiresConfirmation: true,
+      };
+    }
+    if (action === "tab") {
+      return {
+        url: rawURL,
+        kind: "worktreeTab",
+        worktreeID,
+        path: pathSegments.slice(2),
+        input: query.input ?? null,
+        direction: query.direction ?? null,
+        requestedID: query.id ?? null,
+        requiresConfirmation: pathSegments.includes("split") || pathSegments.includes("destroy") || Boolean(query.input),
+      };
+    }
+    const confirmationActions = new Set(["run", "stop", "archive", "unarchive", "delete", "pin", "unpin"]);
+    return {
+      url: rawURL,
+      kind: "worktreeAction",
+      worktreeID,
+      action,
+      requiresConfirmation: confirmationActions.has(action),
+    };
+  }
+  throw new UsageError(`unrecognized deeplink host: ${host}`);
+}
+
+async function executeDeeplink(dbPath, parsed) {
+  switch (parsed.kind) {
+    case "open":
+    case "help":
+      return { focused: true };
+    case "settings":
+      await setSettingValue(dbPath, "requestedSettingsSection", parsed.section);
+      return { settingsSection: parsed.section };
+    case "settingsRepo":
+    case "settingsRepoScripts":
+      await setSettingValue(dbPath, "requestedSettingsRepositoryID", parsed.repositoryID);
+      await setSettingValue(dbPath, "requestedSettingsSection", parsed.kind === "settingsRepoScripts" ? "repoScripts" : "repoGeneral");
+      return { repositoryID: parsed.repositoryID };
+    case "worktreeAction":
+      if (parsed.action === "select") {
+        await setSettingValue(dbPath, "selectedWorktreeID", parsed.worktreeID);
+        return { selectedWorktreeID: parsed.worktreeID };
+      }
+      if (parsed.action === "pin" || parsed.action === "unpin") {
+        await execSQL(
+          dbPath,
+          `UPDATE worktrees SET is_pinned = ${parsed.action === "pin" ? 1 : 0}
+            WHERE id = ${sqlString(parsed.worktreeID)};`
+        );
+        return { worktreeID: parsed.worktreeID, isPinned: parsed.action === "pin" };
+      }
+      if (parsed.action === "archive" || parsed.action === "unarchive") {
+        await execSQL(
+          dbPath,
+          `UPDATE worktrees
+              SET is_archived = ${parsed.action === "archive" ? 1 : 0},
+                  archived_at = ${parsed.action === "archive" ? "unixepoch()" : "NULL"}
+            WHERE id = ${sqlString(parsed.worktreeID)};`
+        );
+        return { worktreeID: parsed.worktreeID, isArchived: parsed.action === "archive" };
+      }
+      return { planned: parsed.action };
+    case "worktreeAppearance": {
+      const assignments = [];
+      if (Object.hasOwn(parsed, "title")) {
+        assignments.push(`custom_title = ${sqlString(parsed.title === "" ? null : parsed.title)}`);
+      }
+      if (Object.hasOwn(parsed, "color")) {
+        assignments.push(`color = ${sqlString(parsed.color === "none" ? null : parsed.color)}`);
+      }
+      if (assignments.length > 0) {
+        await execSQL(dbPath, `UPDATE worktrees SET ${assignments.join(", ")} WHERE id = ${sqlString(parsed.worktreeID)};`);
+      }
+      return { worktreeID: parsed.worktreeID };
+    }
+    case "runScript": {
+      const script = (await scriptRows(dbPath, { id: parsed.scriptID }))[0];
+      if (!script) return { error: `script not found: ${parsed.scriptID}` };
+      const terminal = await createTerminalRecord(dbPath, {
+        worktree: await resolveWorktree(dbPath, parsed.worktreeID),
+        title: script.name,
+        command: script.command,
+      });
+      return { scriptID: parsed.scriptID, terminal };
+    }
+    case "stopScript": {
+      await execSQL(
+        dbPath,
+        `UPDATE running_scripts
+            SET stopped_at = unixepoch()
+          WHERE script_id = ${sqlString(parsed.scriptID)}
+            AND worktree_id = ${sqlString(parsed.worktreeID)}
+            AND stopped_at IS NULL;`
+      );
+      return { scriptID: parsed.scriptID, worktreeID: parsed.worktreeID };
+    }
+    default:
+      return { planned: parsed.kind };
+  }
 }
 
 async function status(dbPath) {
@@ -916,7 +1858,19 @@ function cwdForWorktree(worktree, rawCwd) {
 
 function parseLaunchPlan(row) {
   const { launchPlanJSON, ...rest } = row;
-  return { ...rest, launchPlan: launchPlanJSON ? JSON.parse(launchPlanJSON) : {} };
+  return { ...rest, launchPlan: launchPlanJSON ? parseJSON(launchPlanJSON, {}) : {} };
+}
+
+function parseJSON(value, fallback) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function truthy(value) {
+  return value === true || value === 1 || value === "1";
 }
 
 function relativeDetail(repoPath, workingDirectory) {
@@ -932,16 +1886,23 @@ function usage() {
   supacode-linux doctor
   supacode-linux init [--db path]
   supacode-linux status [--db path]
+  supacode-linux app snapshot [--refresh true] [--db path]
   supacode-linux repo add <path> [--name display-name] [--db path]
   supacode-linux repo add-remote --host <ssh-host> --path <absolute-remote-repo-path> [--name display-name] [--db path]
   supacode-linux repo list [--db path]
   supacode-linux worktree list --repo <repo-id-or-path> [--db path]
   supacode-linux worktree create --repo <repo-id-or-path> --name <branch> [--base ref] [--path path] [--db path]
+  supacode-linux worktree archive|unarchive|pin|unpin --worktree <worktree-id-or-path>
+  supacode-linux worktree customize --worktree <worktree-id-or-path> [--title title] [--color value]
   supacode-linux terminal create --worktree <worktree-id-or-path> [--title title] [--cwd path] [--command command]
   supacode-linux terminal list [--worktree <worktree-id-or-path>]
   supacode-linux terminal close --surface <surface-id>
   supacode-linux github pr sync --worktree <worktree-id-or-path> [--number n] [--repo owner/name]
   supacode-linux github pr list [--worktree <worktree-id-or-path>]
+  supacode-linux settings list|get|set
+  supacode-linux notification list|create|read|dismiss|dismiss-all
+  supacode-linux script list|save|delete|run|stop
+  supacode-linux deeplink parse|run <supacode-url>
   supacode-linux agent list
   supacode-linux agent preview <agent> [--home path]
   supacode-linux agent status [agent] [--home path] [--db path]

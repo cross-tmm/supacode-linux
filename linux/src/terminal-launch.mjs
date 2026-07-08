@@ -4,7 +4,7 @@ import { sshCommandLine } from "./remote-git.mjs";
 import { shellQuote } from "./utils.mjs";
 
 export function findZmxExecutable(env = process.env) {
-  const override = env.AGENT_WORKBENCH_ZMX ?? env.SUPACODE_LINUX_ZMX;
+  const override = env.SUPACODE_LINUX_ZMX ?? env.AGENT_WORKBENCH_ZMX;
   if (override) {
     return executablePath(override);
   }

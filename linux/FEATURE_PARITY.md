@@ -18,14 +18,14 @@ Status values:
 | zmx sessions | Background persistence and reattach | Core only | Qt/Ghostty attach, cleanup, crash recovery |
 | Agent presence | Live badges and attention state | Core only | Hook events update visible badges in real time |
 | Agent integrations | Managed hooks for all supported agents | Core only | Auto-install and cover all Swift-supported agents with preview/install/uninstall |
-| Notifications | In-app and system notifications with sound | Missing | Notification center, sound, click-to-focus |
+| Notifications | In-app and system notifications with sound | Core only | Qt notification center, system sound, and click-to-focus |
 | GitHub PR/check state | Sidebar PR/check/merge readiness | Core only | Visible badges and refresh strategy |
-| Command palette | Fuzzy command palette for app actions | Core only | Full action coverage and keyboard parity |
+| Command palette | Fuzzy command palette for app actions | Core only | Snapshot items exist; full fuzzy scoring/action execution and keyboard parity remain |
 | Settings | Appearance, notifications, scripts, agents | Core only | Wire panes to settings persistence |
-| Scripts | Global and per-repo setup/run/archive scripts | Missing | Script editor, runner, output terminal |
+| Scripts | Global and per-repo setup/run/archive scripts | Core only | Script editor, lifecycle wiring, and output terminal UI |
 | Remote SSH repos | SSH-backed repo/worktree/session flows | Core only | Qt flow, auth error UX, remote zmx integration |
 | CLI | Repo/worktree/tab/split automation | Core only | Command coverage matching macOS CLI surface |
-| Deeplinks | `supacode://` action routing | Missing | Linux desktop URL handler |
+| Deeplinks | `supacode://` action routing | Core only | Linux desktop URL handler and UI confirmation sheet |
 | Packaging | Signed app distribution | Core only | `.deb`, AUR/PKGBUILD, AppImage smoke-tested |
 | Auto-update | Sparkle update channels on macOS | Missing | Linux update strategy chosen and documented |
 | UI/UX | Native command-center experience | Core only | Screenshot/interaction tests pass on Ubuntu and Arch |

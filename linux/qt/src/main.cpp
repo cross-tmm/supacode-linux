@@ -78,6 +78,8 @@ struct Worktree {
 
 struct TerminalSurface {
   QString surfaceID;
+  QString tabID;
+  QString worktreeID;
   QString title;
   QString workingDirectory;
   QString launchBackend;
@@ -92,11 +94,53 @@ struct AgentState {
 };
 
 struct PullRequestState {
+  QString worktreeID;
   int number = 0;
   QString title;
   QString checksState;
   QString mergeReadiness;
   QString url;
+};
+
+struct NotificationItem {
+  QString id;
+  QString worktreeID;
+  QString surfaceID;
+  QString title;
+  QString body;
+  bool isRead = false;
+  bool isDismissed = false;
+};
+
+struct ScriptItem {
+  QString id;
+  QString scope;
+  QString repositoryID;
+  QString kind;
+  QString name;
+  QString command;
+  bool isEnabled = true;
+};
+
+struct CommandPaletteEntry {
+  QString id;
+  QString title;
+  QString subtitle;
+  QString kind;
+  QString worktreeID;
+  QString scriptID;
+};
+
+struct AppSnapshot {
+  QString selectedWorktreeID;
+  QVector<Repository> repositories;
+  QVector<Worktree> worktrees;
+  QVector<TerminalSurface> terminals;
+  QVector<AgentState> agents;
+  QVector<PullRequestState> pullRequests;
+  QVector<NotificationItem> notifications;
+  QVector<ScriptItem> scripts;
+  QVector<CommandPaletteEntry> commandPaletteItems;
 };
 
 QString jsonString(const QJsonObject &object, const QString &key) {
@@ -135,6 +179,105 @@ public:
   explicit CoreClient(QString dbPath) : dbPath_(std::move(dbPath)) {}
 
   bool init(QString *error = nullptr) { return run(QProcessEnvironment(), {"init"}, nullptr, error); }
+
+  AppSnapshot snapshot(QString *error = nullptr) {
+    QJsonDocument document;
+    AppSnapshot result;
+    if (!runJson({"app", "snapshot"}, &document, error)) return result;
+    const auto root = document.object();
+    result.selectedWorktreeID = jsonString(root, "selectedWorktreeID");
+    for (const auto value : root.value("repositories").toArray()) {
+      const auto object = value.toObject();
+      result.repositories.push_back({
+        jsonString(object, "id"),
+        jsonString(object, "kind"),
+        jsonString(object, "rootPath"),
+        jsonString(object, "remoteHost"),
+        jsonString(object, "displayName"),
+      });
+    }
+    for (const auto value : root.value("worktrees").toArray()) {
+      const auto object = value.toObject();
+      result.worktrees.push_back({
+        jsonString(object, "id"),
+        jsonString(object, "repositoryID"),
+        jsonString(object, "workingDirectory"),
+        jsonString(object, "branchName"),
+        jsonString(object, "detail"),
+        jsonBool(object, "isMissing"),
+        jsonBool(object, "isPinned"),
+        jsonBool(object, "isArchived"),
+      });
+    }
+    for (const auto value : root.value("terminalSurfaces").toArray()) {
+      const auto object = value.toObject();
+      result.terminals.push_back({
+        jsonString(object, "surfaceID"),
+        jsonString(object, "tabID"),
+        jsonString(object, "worktreeID"),
+        jsonString(object, "title"),
+        jsonString(object, "workingDirectory"),
+        jsonString(object, "launchBackend"),
+        jsonString(object, "launchCommand"),
+        jsonBool(object, "isClosed"),
+      });
+    }
+    for (const auto value : root.value("agents").toArray()) {
+      const auto object = value.toObject();
+      result.agents.push_back({
+        jsonString(object, "agent"),
+        jsonString(object, "installState"),
+        jsonString(object, "lastError"),
+      });
+    }
+    for (const auto value : root.value("pullRequests").toArray()) {
+      const auto object = value.toObject();
+      result.pullRequests.push_back({
+        jsonString(object, "worktreeID"),
+        object.value("number").toInt(),
+        jsonString(object, "title"),
+        jsonString(object, "checksState"),
+        jsonString(object, "mergeReadiness"),
+        jsonString(object, "url"),
+      });
+    }
+    for (const auto value : root.value("notifications").toArray()) {
+      const auto object = value.toObject();
+      result.notifications.push_back({
+        jsonString(object, "id"),
+        jsonString(object, "worktreeID"),
+        jsonString(object, "surfaceID"),
+        jsonString(object, "title"),
+        jsonString(object, "body"),
+        jsonBool(object, "isRead"),
+        jsonBool(object, "isDismissed"),
+      });
+    }
+    for (const auto value : root.value("scripts").toArray()) {
+      const auto object = value.toObject();
+      result.scripts.push_back({
+        jsonString(object, "id"),
+        jsonString(object, "scope"),
+        jsonString(object, "repositoryID"),
+        jsonString(object, "kind"),
+        jsonString(object, "name"),
+        jsonString(object, "command"),
+        !object.contains("isEnabled") || jsonBool(object, "isEnabled"),
+      });
+    }
+    for (const auto value : root.value("commandPaletteItems").toArray()) {
+      const auto object = value.toObject();
+      result.commandPaletteItems.push_back({
+        jsonString(object, "id"),
+        jsonString(object, "title"),
+        jsonString(object, "subtitle"),
+        jsonString(object, "kind"),
+        jsonString(object, "worktreeID"),
+        jsonString(object, "scriptID"),
+      });
+    }
+    return result;
+  }
 
   QVector<Repository> repositories(QString *error = nullptr) {
     QJsonDocument document;
@@ -183,6 +326,8 @@ public:
       const auto object = value.toObject();
       result.push_back({
         jsonString(object, "surfaceID"),
+        jsonString(object, "tabID"),
+        jsonString(object, "worktreeID"),
         jsonString(object, "title"),
         jsonString(object, "workingDirectory"),
         jsonString(object, "launchBackend"),
@@ -215,6 +360,7 @@ public:
     for (const auto value : document.array()) {
       const auto object = value.toObject();
       result.push_back({
+        jsonString(object, "worktreeID"),
         object.value("number").toInt(),
         jsonString(object, "title"),
         jsonString(object, "checksState"),
@@ -475,18 +621,37 @@ public:
   bool refresh() {
     QString error;
     core_.init(&error);
-    repositories_ = core_.repositories(&error);
-    worktrees_.clear();
     refreshErrors_.clear();
-    for (const auto &repo : repositories_) {
-      QString worktreeError;
-      auto rows = core_.worktrees(repo.id, &worktreeError);
-      if (!worktreeError.isEmpty()) refreshErrors_.push_back(repo.displayName + ": " + worktreeError);
-      for (const auto &row : rows) worktrees_.push_back(row);
+    const auto snapshot = core_.snapshot(&error);
+    if (!error.isEmpty()) {
+      refreshErrors_.push_back(error);
+      repositories_ = core_.repositories(&error);
+      worktrees_.clear();
+      for (const auto &repo : repositories_) {
+        QString worktreeError;
+        auto rows = core_.worktrees(repo.id, &worktreeError);
+        if (!worktreeError.isEmpty()) refreshErrors_.push_back(repo.displayName + ": " + worktreeError);
+        for (const auto &row : rows) worktrees_.push_back(row);
+      }
+      terminals_ = core_.terminals({}, &error);
+      agents_ = core_.agents(&error);
+      pullRequests_ = core_.pullRequests(&error);
+      notifications_.clear();
+      scripts_.clear();
+      paletteEntries_.clear();
+    } else {
+      repositories_ = snapshot.repositories;
+      worktrees_ = snapshot.worktrees;
+      terminals_ = snapshot.terminals;
+      agents_ = snapshot.agents;
+      pullRequests_ = snapshot.pullRequests;
+      notifications_ = snapshot.notifications;
+      scripts_ = snapshot.scripts;
+      paletteEntries_ = snapshot.commandPaletteItems;
+      if (selectedWorktreeID_.isEmpty() && !snapshot.selectedWorktreeID.isEmpty()) {
+        selectedWorktreeID_ = snapshot.selectedWorktreeID;
+      }
     }
-    terminals_ = core_.terminals({}, &error);
-    agents_ = core_.agents(&error);
-    pullRequests_ = core_.pullRequests(&error);
     renderSidebar();
     renderCurrentDetail();
     updatePaletteItems();
@@ -767,7 +932,15 @@ private:
       const auto pr = pullRequests_.front();
       prSummary_->setText(QString("#%1 %2\n%3 / %4").arg(pr.number).arg(pr.title, pr.checksState, pr.mergeReadiness));
     }
-    notificationSummary_->setText(QString("%1 agents, %2 repository refresh errors").arg(agents_.size()).arg(refreshErrors_.size()));
+    const auto unread = std::count_if(notifications_.begin(), notifications_.end(), [](const NotificationItem &item) {
+      return !item.isRead && !item.isDismissed;
+    });
+    notificationSummary_->setText(
+      QString("%1 unread notifications, %2 agents, %3 scripts")
+        .arg(unread)
+        .arg(agents_.size())
+        .arg(scripts_.size())
+    );
   }
 
   void sidebarSelectionChanged() {
@@ -782,8 +955,12 @@ private:
 
   void updatePaletteItems() {
     QStringList items;
-    items << "Open Repository or Folder..." << "Add Remote Repository..." << "Clone Repository..." << "Settings" << "Refresh Worktrees" << "Archived Worktrees";
-    for (const auto &worktree : worktrees_) items << QString("Switch to %1").arg(worktree.branchName);
+    if (!paletteEntries_.isEmpty()) {
+      for (const auto &entry : paletteEntries_) items << entry.title;
+    } else {
+      items << "Open Repository or Folder..." << "Add Remote Repository..." << "Clone Repository..." << "Settings" << "Refresh Worktrees" << "Archived Worktrees";
+      for (const auto &worktree : worktrees_) items << QString("Switch to %1").arg(worktree.branchName);
+    }
     palette_->setItems(items);
   }
 
@@ -791,7 +968,37 @@ private:
   void showSettings() { SettingsWindow(this).exec(); }
 
   void handlePaletteItem(const QString &item) {
-    if (item == "Settings") {
+    const auto entry = std::find_if(paletteEntries_.begin(), paletteEntries_.end(), [&item](const CommandPaletteEntry &row) {
+      return row.title == item;
+    });
+    if (entry != paletteEntries_.end()) {
+      if (entry->kind == "selectWorktree" && !entry->worktreeID.isEmpty()) {
+        selectedWorktreeID_ = entry->worktreeID;
+        renderCurrentDetail();
+        return;
+      }
+      if (entry->kind == "openSettings") {
+        showSettings();
+        return;
+      }
+      if (entry->kind == "refreshWorktrees") {
+        refresh();
+        return;
+      }
+      if (entry->kind == "addRemoteRepository") {
+        showRemoteDialog();
+        return;
+      }
+      if (entry->kind == "cloneRepository") {
+        showCloneDialog();
+        return;
+      }
+      if (entry->kind == "runScript" || entry->kind == "stopScript") {
+        showInformation("Scripts", "Script run and stop actions are available through the Supacode Linux core.");
+        return;
+      }
+    }
+    if (item == "Settings" || item == "Open Settings") {
       showSettings();
     } else if (item == "Refresh Worktrees") {
       refresh();
@@ -869,6 +1076,9 @@ private:
   QVector<TerminalSurface> terminals_;
   QVector<AgentState> agents_;
   QVector<PullRequestState> pullRequests_;
+  QVector<NotificationItem> notifications_;
+  QVector<ScriptItem> scripts_;
+  QVector<CommandPaletteEntry> paletteEntries_;
   QVector<QString> refreshErrors_;
   QString selectedWorktreeID_;
   QTreeWidget *sidebar_ = nullptr;

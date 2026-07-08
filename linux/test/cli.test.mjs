@@ -252,7 +252,7 @@ test("registers a git repository and creates a worktree", async () => {
     assert.equal(worktrees.length, 2);
     assert.ok(worktrees.some((worktree) => worktree.branchName === "feature/linux-core"));
 
-    const noZmxEnv = { ...process.env, AGENT_WORKBENCH_ZMX: join(dir, "missing-zmx") };
+    const noZmxEnv = { ...process.env, SUPACODE_LINUX_ZMX: join(dir, "missing-zmx") };
     const createdTerminal = await spawnFileJSON(
       "node",
       [
@@ -364,6 +364,115 @@ test("registers an SSH repository and creates a remote worktree", async () => {
     const worktrees = await spawnFileJSON("node", [cli, "--db", db, "worktree", "list", "--repo", added.id], { env });
     assert.equal(worktrees.some((worktree) => worktree.branchName === "feature/ssh-core"), true);
     assert.equal(worktrees.some((worktree) => worktree.repositoryID === added.id), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("exposes parity snapshot, settings, notifications, scripts, and deeplinks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const repo = join(dir, "repo");
+    await spawnFile("git", ["init", repo]);
+    await spawnFile("git", ["-C", repo, "config", "user.email", "test@example.invalid"]);
+    await spawnFile("git", ["-C", repo, "config", "user.name", "Supacode Test"]);
+    writeFileSync(join(repo, "README.md"), "# parity\n");
+    await spawnFile("git", ["-C", repo, "add", "README.md"]);
+    await spawnFile("git", ["-C", repo, "commit", "-m", "Initial commit"]);
+
+    const added = await spawnFileJSON("node", [cli, "--db", db, "repo", "add", repo, "--name", "Parity Repo"]);
+    const worktrees = await spawnFileJSON("node", [cli, "--db", db, "worktree", "list", "--repo", added.id]);
+    const worktree = worktrees[0];
+
+    const setting = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "settings",
+      "set",
+      "selectedWorktreeID",
+      JSON.stringify(worktree.id),
+    ]);
+    assert.equal(setting.value, worktree.id);
+
+    const notification = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "notification",
+      "create",
+      "--worktree",
+      worktree.id,
+      "--title",
+      "Agent needs input",
+      "--body",
+      "Review the pending command.",
+    ]);
+    assert.equal(notification.title, "Agent needs input");
+    const unread = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "notification",
+      "list",
+      "--unread",
+      "true",
+    ]);
+    assert.equal(unread.length, 1);
+
+    const script = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "script",
+      "save",
+      "--name",
+      "Run tests",
+      "--kind",
+      "run",
+      "--command",
+      "echo parity",
+    ]);
+    assert.equal(script.scope, "global");
+    assert.equal(script.kind, "run");
+
+    const noZmxEnv = { ...process.env, SUPACODE_LINUX_ZMX: join(dir, "missing-zmx") };
+    const running = await spawnFileJSON(
+      "node",
+      [cli, "--db", db, "script", "run", "--id", script.id, "--worktree", worktree.id],
+      { env: noZmxEnv }
+    );
+    assert.equal(running.script.id, script.id);
+    assert.equal(running.terminal.launch.backend, "shell");
+
+    const encodedWorktree = encodeURIComponent(worktree.id);
+    const pinURL = `supacode://worktree/${encodedWorktree}/pin`;
+    const parsed = await spawnFileJSON("node", [cli, "--db", db, "deeplink", "parse", pinURL]);
+    assert.equal(parsed.requiresConfirmation, true);
+    const blocked = await spawnFileJSON("node", [cli, "--db", db, "deeplink", "run", pinURL]);
+    assert.equal(blocked.executed, false);
+    assert.equal(blocked.confirmationRequired, true);
+    const executed = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "deeplink",
+      "run",
+      pinURL,
+      "--allowUnconfirmed",
+      "true",
+    ]);
+    assert.equal(executed.executed, true);
+
+    const snapshot = await spawnFileJSON("node", [cli, "--db", db, "app", "snapshot"]);
+    assert.equal(snapshot.selectedWorktreeID, worktree.id);
+    assert.equal(snapshot.repositories.length, 1);
+    assert.equal(snapshot.worktrees.length, 1);
+    assert.equal(snapshot.notifications.length, 1);
+    assert.equal(snapshot.scripts.length, 1);
+    assert.ok(snapshot.sidebar.sections.some((section) => section.repositoryID === added.id));
+    assert.ok(snapshot.commandPaletteItems.some((item) => item.kind === "runScript" || item.kind === "stopScript"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

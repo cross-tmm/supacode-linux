@@ -24,6 +24,10 @@ are wired end to end.
 - Auto-installed managed hooks with preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
 - GitHub PR/check state normalization through `gh`.
+- Parity snapshot API for the Qt shell: repositories, worktrees, sidebar projection, terminals,
+  notifications, agents, scripts, settings, PRs, and command palette items.
+- Persisted settings, notification dismissal/read state, script definitions/running-script state,
+  worktree archive/pin/appearance mutations, and deeplink parsing/confirmation policy.
 - Qt desktop shell that reads core state and renders the Supacode sidebar/detail/command-palette
   structure.
 - Ubuntu/Debian, Arch, and AppImage packaging metadata for the `supacode` binary.
@@ -38,8 +42,8 @@ These are required before claiming "no feature difference" with the Swift app:
 - Real Ghostty split panes and terminal search overlay.
 - System notifications and sounds.
 - Fully wired remote SSH forms and zmx session transport.
-- Global/per-repo scripts UI.
-- Deeplink handling.
+- Full global/per-repo scripts UI.
+- Desktop registration and UI confirmation flow for `supacode://` deeplinks.
 - Full agent integration coverage beyond Codex and Copilot.
 - AUR and AppImage release artifacts.
 
@@ -112,6 +116,7 @@ Or use the CLI directly:
 ```bash
 node linux/src/supacode-linux.mjs init
 node linux/src/supacode-linux.mjs status
+node linux/src/supacode-linux.mjs app snapshot
 ```
 
 The default database path is:
@@ -142,6 +147,13 @@ node linux/src/supacode-linux.mjs worktree list --repo /path/to/repo
 node linux/src/supacode-linux.mjs worktree create \
   --repo /path/to/repo \
   --name task/example
+
+node linux/src/supacode-linux.mjs worktree pin --worktree /path/to/worktree
+node linux/src/supacode-linux.mjs worktree archive --worktree /path/to/worktree
+node linux/src/supacode-linux.mjs worktree customize \
+  --worktree /path/to/worktree \
+  --title "Review task" \
+  --color blue
 ```
 
 Register an SSH repository:
@@ -197,7 +209,7 @@ SUPACODE_SURFACE_ID
 Those IDs are how agent hooks route events back to the correct surface.
 
 `terminal create` also persists a launch plan. The planner prefers zmx when `zmx` is on `PATH` or
-`AGENT_WORKBENCH_ZMX` points at an executable. If zmx is missing, it records a degraded shell plan
+`SUPACODE_LINUX_ZMX` points at an executable. If zmx is missing, it records a degraded shell plan
 instead of failing:
 
 ```json
@@ -211,6 +223,58 @@ instead of failing:
 Remote worktree surfaces use SSH command lines with connection multiplexing. When local zmx is
 available, the local surface wraps the SSH command in `zmx attach`; the remote command also tries
 host-side `zmx attach` and falls back to the host shell when zmx is unavailable there.
+
+## Snapshot, Settings, Notifications, Scripts, and Deeplinks
+
+The Qt shell should prefer one snapshot call over several small list calls:
+
+```bash
+node linux/src/supacode-linux.mjs app snapshot
+node linux/src/supacode-linux.mjs app snapshot --refresh true
+```
+
+Persist settings as JSON values:
+
+```bash
+node linux/src/supacode-linux.mjs settings set selectedWorktreeID '"<worktree-id>"'
+node linux/src/supacode-linux.mjs settings get selectedWorktreeID
+```
+
+Create and manage notifications:
+
+```bash
+node linux/src/supacode-linux.mjs notification create \
+  --worktree "<worktree-id>" \
+  --title "Agent needs input" \
+  --body "Review the pending command."
+
+node linux/src/supacode-linux.mjs notification list --unread true
+node linux/src/supacode-linux.mjs notification dismiss-all
+```
+
+Create and run scripts. Script runs allocate a terminal surface with the same zmx/SSH fallback
+logic as `terminal create`.
+
+```bash
+node linux/src/supacode-linux.mjs script save \
+  --name "Run tests" \
+  --kind run \
+  --command "pnpm test"
+
+node linux/src/supacode-linux.mjs script run --id "<script-id>" --worktree "<worktree-id>"
+node linux/src/supacode-linux.mjs script stop --id "<script-id>" --worktree "<worktree-id>"
+```
+
+Deeplinks mirror the Swift app's route structure. Unsafe routes report a confirmation requirement
+unless explicitly allowed or `deeplink.allowArbitraryActions` is set to `true`.
+
+```bash
+node linux/src/supacode-linux.mjs deeplink parse "supacode://settings/developer"
+node linux/src/supacode-linux.mjs deeplink run "supacode://worktree/<encoded-id>/pin"
+node linux/src/supacode-linux.mjs deeplink run \
+  "supacode://worktree/<encoded-id>/pin" \
+  --allowUnconfirmed true
+```
 
 ## Agent Hooks
 
