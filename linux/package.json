@@ -8,6 +8,7 @@
   },
   "scripts": {
     "doctor": "node src/supacode-linux.mjs doctor",
+    "agent-status": "node src/supacode-linux.mjs agent status",
     "test": "node --test test/*.test.mjs",
     "state-check": "node src/supacode-linux.mjs init --db /tmp/supacode-linux-state-check.sqlite3"
   },

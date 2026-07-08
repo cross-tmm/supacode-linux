@@ -2,6 +2,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import {
+  installAgent,
+  installState,
+  previewAgent,
+  recordAgentState,
+  supportedAgents,
+  uninstallAgent,
+} from "./agent-integrations.mjs";
 import { spawnFile, spawnFileJSON, sqlString } from "./utils.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
@@ -31,6 +39,9 @@ async function main(argv) {
       case "worktree":
         await handleWorktree(subcommand, rest, dbPath);
         return;
+      case "agent":
+        await handleAgent(subcommand, rest, dbPath);
+        return;
       case "status":
         await status(dbPath);
         return;
@@ -55,6 +66,117 @@ async function main(argv) {
     console.error(error.message);
     process.exitCode = 1;
   }
+}
+
+async function handleAgent(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "list":
+      console.log(JSON.stringify(supportedAgents, null, 2));
+      return;
+    case "preview":
+      await previewAgentCommand(argv);
+      return;
+    case "status":
+      await agentStatus(argv, dbPath);
+      return;
+    case "install":
+      await installAgentCommand(argv, dbPath);
+      return;
+    case "uninstall":
+      await uninstallAgentCommand(argv, dbPath);
+      return;
+    case "event":
+      await recordAgentEvent(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("agent requires list, preview, status, install, uninstall, or event");
+  }
+}
+
+async function previewAgentCommand(argv) {
+  const options = parseOptions(argv);
+  const agent = requireAgent(options._[0]);
+  console.log(JSON.stringify(previewAgent(agent, options.home ?? homedir()), null, 2));
+}
+
+async function agentStatus(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const agents = options._[0] ? [requireAgent(options._[0])] : supportedAgents;
+  const rows = [];
+  for (const agent of agents) {
+    let state = "failed";
+    let error = null;
+    try {
+      state = installState(agent, options.home ?? homedir());
+    } catch (caught) {
+      error = caught.message;
+    }
+    await recordAgentState(execSQL, dbPath, agent, state, error);
+    rows.push({ agent, state, error });
+  }
+  console.log(JSON.stringify(rows, null, 2));
+}
+
+async function installAgentCommand(argv, dbPath) {
+  const options = parseOptions(argv);
+  const agent = requireAgent(options._[0]);
+  await migrate(dbPath);
+  try {
+    const state = installAgent(agent, options.home ?? homedir());
+    await recordAgentState(execSQL, dbPath, agent, state);
+    console.log(JSON.stringify({ agent, state }));
+  } catch (error) {
+    await recordAgentState(execSQL, dbPath, agent, "failed", error.message);
+    throw error;
+  }
+}
+
+async function uninstallAgentCommand(argv, dbPath) {
+  const options = parseOptions(argv);
+  const agent = requireAgent(options._[0]);
+  await migrate(dbPath);
+  try {
+    const state = uninstallAgent(agent, options.home ?? homedir());
+    await recordAgentState(execSQL, dbPath, agent, state);
+    console.log(JSON.stringify({ agent, state }));
+  } catch (error) {
+    await recordAgentState(execSQL, dbPath, agent, "failed", error.message);
+    throw error;
+  }
+}
+
+async function recordAgentEvent(argv, dbPath) {
+  const options = parseOptions(argv);
+  const agent = requireAgent(options.agent);
+  const event = requireEvent(options.event);
+  await migrate(dbPath);
+  const payload = {
+    notify: options.notify === "true",
+  };
+  await execSQL(
+    dbPath,
+    `INSERT INTO agent_events(agent, event, worktree_id, tab_id, surface_id, payload_json)
+     VALUES (${sqlString(agent)}, ${sqlString(event)}, ${sqlString(options.worktree ?? "")},
+             ${sqlString(options.tab ?? "")}, ${sqlString(options.surface ?? "")},
+             ${sqlString(JSON.stringify(payload))});`
+  );
+  console.log(JSON.stringify({ agent, event, recorded: true }));
+}
+
+function requireAgent(agent) {
+  if (!supportedAgents.includes(agent)) {
+    throw new UsageError(`agent must be one of: ${supportedAgents.join(", ")}`);
+  }
+  return agent;
+}
+
+function requireEvent(event) {
+  const events = ["session_start", "session_end", "busy", "awaiting_input", "idle"];
+  if (!events.includes(event)) {
+    throw new UsageError(`event must be one of: ${events.join(", ")}`);
+  }
+  return event;
 }
 
 function parseGlobalArgs(argv) {
@@ -280,6 +402,7 @@ async function status(dbPath) {
   const [repoCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM repositories;");
   const [worktreeCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM worktrees;");
   const [notificationCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM notifications WHERE is_read = 0;");
+  const [agentEventCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM agent_events;");
   console.log(
     JSON.stringify(
       {
@@ -287,6 +410,7 @@ async function status(dbPath) {
         repositories: repoCount.count,
         worktrees: worktreeCount.count,
         unreadNotifications: notificationCount.count,
+        agentEvents: agentEventCount.count,
       },
       null,
       2
@@ -415,7 +539,13 @@ function usage() {
   supacode-linux repo add <path> [--name display-name] [--db path]
   supacode-linux repo list [--db path]
   supacode-linux worktree list --repo <repo-id-or-path> [--db path]
-  supacode-linux worktree create --repo <repo-id-or-path> --name <branch> [--base ref] [--path path] [--db path]`);
+  supacode-linux worktree create --repo <repo-id-or-path> --name <branch> [--base ref] [--path path] [--db path]
+  supacode-linux agent list
+  supacode-linux agent preview <agent> [--home path]
+  supacode-linux agent status [agent] [--home path] [--db path]
+  supacode-linux agent install <agent> [--home path] [--db path]
+  supacode-linux agent uninstall <agent> [--home path] [--db path]
+  supacode-linux agent event --agent <agent> --event <event> [--surface id] [--worktree id] [--tab id] [--db path]`);
 }
 
 class UsageError extends Error {}

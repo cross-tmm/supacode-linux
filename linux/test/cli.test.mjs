@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -16,6 +16,95 @@ test("initializes state database and reports status", async () => {
     assert.equal(status.dbPath, db);
     assert.equal(status.repositories, 0);
     assert.equal(status.worktrees, 0);
+    assert.equal(status.agentEvents, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("previews, installs, tracks, and uninstalls managed Copilot hooks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const home = join(dir, "home");
+    const preview = await spawnFileJSON("node", [cli, "--db", db, "agent", "preview", "copilot", "--home", home]);
+    assert.equal(preview.agent, "copilot");
+    assert.equal(preview.files.length, 1);
+    assert.equal(preview.files[0].operation, "create");
+
+    const installed = await spawnFileJSON("node", [cli, "--db", db, "agent", "install", "copilot", "--home", home]);
+    assert.equal(installed.state, "installed");
+    const hookPath = join(home, ".copilot/hooks/supacode.json");
+    assert.equal(existsSync(hookPath), true);
+    assert.match(readFileSync(hookPath, "utf8"), /supacode-managed-hook/);
+
+    const status = await spawnFileJSON("node", [cli, "--db", db, "agent", "status", "copilot", "--home", home]);
+    assert.equal(status[0].state, "installed");
+
+    const event = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "agent",
+      "event",
+      "--agent",
+      "copilot",
+      "--event",
+      "busy",
+      "--surface",
+      "surface-1",
+    ]);
+    assert.equal(event.recorded, true);
+    const summary = await spawnFileJSON("node", [cli, "--db", db, "status"]);
+    assert.equal(summary.agentEvents, 1);
+
+    const uninstalled = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "agent",
+      "uninstall",
+      "copilot",
+      "--home",
+      home,
+    ]);
+    assert.equal(uninstalled.state, "not_installed");
+    assert.equal(existsSync(hookPath), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("installs Codex hooks into an owned hooks file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const home = join(dir, "home");
+    const installed = await spawnFileJSON("node", [cli, "--db", db, "agent", "install", "codex", "--home", home]);
+    assert.equal(installed.state, "installed");
+
+    const hookPath = join(home, ".codex/hooks.json");
+    const hooks = JSON.parse(readFileSync(hookPath, "utf8"));
+    assert.ok(hooks.hooks.SessionStart);
+    assert.match(JSON.stringify(hooks), /supacode-managed-hook/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("refuses to overwrite unmanaged agent hook files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const home = join(dir, "home");
+    const hookPath = join(home, ".copilot/hooks/supacode.json");
+    mkdirSync(join(home, ".copilot/hooks"), { recursive: true });
+    writeFileSync(hookPath, "{}\n");
+
+    await assert.rejects(
+      () => spawnFile("node", [cli, "--db", db, "agent", "install", "copilot", "--home", home]),
+      /refusing to overwrite unmanaged file/
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -11,6 +11,8 @@ stable state and command boundary.
 - A runnable Linux core CLI at `linux/src/supacode-linux.mjs`.
 - Repository registration and listing.
 - Git worktree discovery and creation.
+- Safe managed-hook preview/status/install/uninstall for Codex and Copilot.
+- Durable agent hook event capture in SQLite.
 - Ubuntu/Debian, Arch, and AppImage packaging skeletons.
 - CI-friendly checks through Makefile targets.
 
@@ -37,6 +39,9 @@ node linux/src/supacode-linux.mjs repo add /path/to/repo
 node linux/src/supacode-linux.mjs repo list
 node linux/src/supacode-linux.mjs worktree list --repo /path/to/repo
 node linux/src/supacode-linux.mjs worktree create --repo /path/to/repo --name task/example
+node linux/src/supacode-linux.mjs agent status
+node linux/src/supacode-linux.mjs agent preview codex
+node linux/src/supacode-linux.mjs agent install copilot
 ```
 
 Use `SUPACODE_LINUX_DB=/path/to/state.sqlite3` to override the default state path.
