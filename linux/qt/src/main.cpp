@@ -879,7 +879,10 @@ private:
         child->setIcon(0, QIcon(iconPath(worktree.isMissing ? "git-pull-request-closed.svg" : "git-branch.svg")));
         child->setData(0, Qt::UserRole, worktree.id);
         child->setToolTip(0, worktree.detail.isEmpty() ? worktree.workingDirectory : worktree.detail);
-        if (worktree.isPinned) new QTreeWidgetItem(pinned, QStringList(child->text(0)), WorktreeItem)->setData(0, Qt::UserRole, worktree.id);
+        if (worktree.isPinned) {
+          auto *pinnedItem = new QTreeWidgetItem(pinned, QStringList(child->text(0)), WorktreeItem);
+          pinnedItem->setData(0, Qt::UserRole, worktree.id);
+        }
       }
     }
     pinned->setHidden(pinned->childCount() == 0);
@@ -1026,7 +1029,7 @@ private:
     path->setPlaceholderText("Path");
     layout->addWidget(server);
     layout->addWidget(path);
-    auto *buttons = dialogButtons("Cancel", "Add");
+    auto buttons = dialogButtons("Cancel", "Add");
     connect(buttons.second, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(buttons.first, &QPushButton::clicked, &dialog, &QDialog::reject);
     layout->addWidget(buttons.first->parentWidget());
@@ -1046,7 +1049,7 @@ private:
     folder->setPlaceholderText("Folder Name");
     layout->addWidget(url);
     layout->addWidget(folder);
-    auto *buttons = dialogButtons("Cancel", "Clone");
+    auto buttons = dialogButtons("Cancel", "Clone");
     connect(buttons.second, &QPushButton::clicked, &dialog, &QDialog::accept);
     connect(buttons.first, &QPushButton::clicked, &dialog, &QDialog::reject);
     layout->addWidget(buttons.first->parentWidget());
