@@ -283,6 +283,76 @@ test("registers a git repository and creates a worktree", async () => {
     assert.equal(terminals[0].launchBackend, "shell");
     assert.equal(terminals[0].launchPlan.backend, "shell");
 
+    const tabs = await spawnFileJSON("node", [cli, "--db", db, "tab", "list", "-w", worktreePath]);
+    assert.equal(tabs.length, 1);
+    assert.equal(tabs[0].tabID, createdTerminal.tabID);
+    assert.equal(tabs[0].selectedSurfaceID, createdTerminal.surfaceID);
+
+    const secondTabID = "22222222-2222-4222-8222-222222222222";
+    const secondTab = await spawnFileJSON(
+      "node",
+      [
+        cli,
+        "--db",
+        db,
+        "tab",
+        "new",
+        "-w",
+        worktreePath,
+        "--title",
+        "Second task",
+        "-i",
+        "echo second",
+        "-n",
+        secondTabID,
+      ],
+      { env: noZmxEnv }
+    );
+    assert.equal(secondTab.tabID, secondTabID);
+    assert.equal(secondTab.launch.backend, "shell");
+
+    const splitSurfaceID = "33333333-3333-4333-8333-333333333333";
+    const splitSurface = await spawnFileJSON(
+      "node",
+      [
+        cli,
+        "--db",
+        db,
+        "surface",
+        "split",
+        "-s",
+        createdTerminal.surfaceID,
+        "-d",
+        "v",
+        "-i",
+        "npm test",
+        "-n",
+        splitSurfaceID,
+      ],
+      { env: noZmxEnv }
+    );
+    assert.equal(splitSurface.surfaceID, splitSurfaceID);
+    assert.equal(splitSurface.splitParentID, createdTerminal.surfaceID);
+    assert.equal(splitSurface.splitDirection, "vertical");
+    assert.equal(splitSurface.launch.backend, "shell");
+
+    const surfaces = await spawnFileJSON("node", [cli, "--db", db, "surface", "list", "-t", createdTerminal.tabID]);
+    assert.equal(surfaces.length, 2);
+    assert.ok(surfaces.some((surface) => surface.surfaceID === splitSurfaceID));
+
+    const focused = await spawnFileJSON("node", [cli, "--db", db, "surface", "focus", "-s", createdTerminal.surfaceID]);
+    assert.equal(focused.focused, true);
+    assert.equal(focused.surfaceID, createdTerminal.surfaceID);
+
+    const closedSplit = await spawnFileJSON("node", [cli, "--db", db, "surface", "close", "-s", splitSurfaceID]);
+    assert.equal(closedSplit.isClosed, true);
+    assert.equal(closedSplit.selectedSurfaceID, createdTerminal.surfaceID);
+
+    const closedTab = await spawnFileJSON("node", [cli, "--db", db, "tab", "close", "-t", secondTabID]);
+    assert.equal(closedTab.isClosed, true);
+    const openTabs = await spawnFileJSON("node", [cli, "--db", db, "tab", "list", "-w", worktreePath]);
+    assert.equal(openTabs.length, 1);
+
     const closed = await spawnFileJSON("node", [
       cli,
       "--db",
@@ -465,8 +535,32 @@ test("exposes parity snapshot, settings, notifications, scripts, and deeplinks",
     ]);
     assert.equal(executed.executed, true);
 
+    const deeplinkTabID = "44444444-4444-4444-8444-444444444444";
+    const tabURL = `supacode://worktree/${encodedWorktree}/tab/new?input=echo%20deeplink&id=${deeplinkTabID}`;
+    const deeplinkTab = await spawnFileJSON(
+      "node",
+      [cli, "--db", db, "deeplink", "run", tabURL, "--allowUnconfirmed", "true"],
+      { env: noZmxEnv }
+    );
+    assert.equal(deeplinkTab.executed, true);
+    assert.equal(deeplinkTab.result.tabID, deeplinkTabID);
+
+    const deeplinkSurfaceID = "55555555-5555-4555-8555-555555555555";
+    const splitURL =
+      `supacode://worktree/${encodedWorktree}/tab/${running.terminal.tabID}` +
+      `/surface/${running.terminal.surfaceID}/split?direction=horizontal&id=${deeplinkSurfaceID}`;
+    const deeplinkSplit = await spawnFileJSON(
+      "node",
+      [cli, "--db", db, "deeplink", "run", splitURL, "--allowUnconfirmed", "true"],
+      { env: noZmxEnv }
+    );
+    assert.equal(deeplinkSplit.executed, true);
+    assert.equal(deeplinkSplit.result.surfaceID, deeplinkSurfaceID);
+    assert.equal(deeplinkSplit.result.splitDirection, "horizontal");
+
     const snapshot = await spawnFileJSON("node", [cli, "--db", db, "app", "snapshot"]);
     assert.equal(snapshot.selectedWorktreeID, worktree.id);
+    assert.equal(snapshot.selectedSurfaceID, deeplinkSurfaceID);
     assert.equal(snapshot.repositories.length, 1);
     assert.equal(snapshot.worktrees.length, 1);
     assert.equal(snapshot.notifications.length, 1);

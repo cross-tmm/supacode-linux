@@ -49,6 +49,12 @@ async function main(argv) {
       case "terminal":
         await handleTerminal(subcommand, rest, dbPath);
         return;
+      case "tab":
+        await handleTab(subcommand, rest, dbPath);
+        return;
+      case "surface":
+        await handleSurface(subcommand, rest, dbPath);
+        return;
       case "github":
         await handleGithub(subcommand, rest, dbPath);
         return;
@@ -179,11 +185,15 @@ async function appSnapshot(argv, dbPath) {
   const runningScripts = await runningScriptRows(dbPath, {});
   const settings = await settingsObject(dbPath);
   const selectedWorktreeID = settings.selectedWorktreeID ?? null;
+  const selectedTabID = settings.selectedTabID ?? null;
+  const selectedSurfaceID = settings.selectedSurfaceID ?? null;
   const snapshot = {
     schemaVersion: 6,
     generatedAt: Math.floor(Date.now() / 1000),
     settings,
     selectedWorktreeID,
+    selectedTabID,
+    selectedSurfaceID,
     repositories,
     worktrees,
     sidebar: sidebarSnapshot(repositories, worktrees, selectedWorktreeID),
@@ -424,6 +434,44 @@ async function handleTerminal(subcommand, argv, dbPath) {
   }
 }
 
+async function handleTab(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "list":
+      await listTabs(argv, dbPath);
+      return;
+    case "focus":
+      await focusTab(argv, dbPath);
+      return;
+    case "new":
+      await newTab(argv, dbPath);
+      return;
+    case "close":
+      await closeTab(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("tab requires list, focus, new, or close");
+  }
+}
+
+async function handleSurface(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "list":
+      await listSurfaces(argv, dbPath);
+      return;
+    case "focus":
+      await focusSurface(argv, dbPath);
+      return;
+    case "split":
+      await splitSurface(argv, dbPath);
+      return;
+    case "close":
+      await closeSurface(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("surface requires list, focus, split, or close");
+  }
+}
+
 async function createTerminal(argv, dbPath) {
   const options = parseOptions(argv);
   if (!options.worktree) {
@@ -439,9 +487,40 @@ async function createTerminal(argv, dbPath) {
   console.log(JSON.stringify(created));
 }
 
-async function createTerminalRecord(dbPath, { worktree, title, cwd: rawCwd, command }) {
-  const tabID = randomUUID();
-  const surfaceID = randomUUID();
+async function createTerminalRecord(dbPath, { worktree, title, cwd: rawCwd, command, tabID = randomUUID(), surfaceID = randomUUID() }) {
+  const terminalTitle = title ?? worktree.branchName ?? basename(worktree.workingDirectory);
+  await execSQL(
+    dbPath,
+    `INSERT INTO terminal_tabs(id, worktree_id, title, sort_order, selected_surface_id)
+     VALUES (${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(terminalTitle)}, 0, ${sqlString(surfaceID)});`
+  );
+  const surface = await createSurfaceRecord(dbPath, {
+    worktree,
+    tabID,
+    surfaceID,
+    title: terminalTitle,
+    cwd: rawCwd,
+    command,
+  });
+  await setSelectedTerminal(dbPath, {
+    worktreeID: worktree.id,
+    tabID,
+    surfaceID,
+  });
+  return {
+    worktreeID: worktree.id,
+    tabID,
+    surfaceID,
+    zmxSessionID: surface.zmxSessionID,
+    launch: surface.launch,
+    env: surface.env,
+  };
+}
+
+async function createSurfaceRecord(
+  dbPath,
+  { worktree, tabID, surfaceID = randomUUID(), title, cwd: rawCwd, command, splitParentID = null, splitDirection = null }
+) {
   const terminalTitle = title ?? worktree.branchName ?? basename(worktree.workingDirectory);
   const cwd = cwdForWorktree(worktree, rawCwd);
   const launchCommand = command ?? null;
@@ -454,24 +533,29 @@ async function createTerminalRecord(dbPath, { worktree, title, cwd: rawCwd, comm
   });
   await execSQL(
     dbPath,
-    `INSERT INTO terminal_tabs(id, worktree_id, title, sort_order, selected_surface_id)
-     VALUES (${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(terminalTitle)}, 0, ${sqlString(surfaceID)});`
+    `INSERT INTO terminal_surfaces(
+       id, tab_id, worktree_id, zmx_session_id, title, working_directory,
+       split_parent_id, split_direction, launch_command, launch_backend,
+       launch_plan_json, task_status
+     )
+     VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(launch.zmxSessionID)},
+             ${sqlString(terminalTitle)}, ${sqlString(cwd)}, ${sqlString(splitParentID)},
+             ${sqlString(splitDirection)}, ${sqlString(launchCommand)}, ${sqlString(launch.backend)},
+             ${sqlString(JSON.stringify(launch))}, 'idle');`
   );
   await execSQL(
     dbPath,
-    `INSERT INTO terminal_surfaces(
-       id, tab_id, worktree_id, zmx_session_id, title, working_directory,
-       launch_command, launch_backend, launch_plan_json, task_status
-     )
-     VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(launch.zmxSessionID)},
-             ${sqlString(terminalTitle)}, ${sqlString(cwd)}, ${sqlString(launchCommand)},
-             ${sqlString(launch.backend)}, ${sqlString(JSON.stringify(launch))}, 'idle');`
+    `UPDATE terminal_tabs
+        SET selected_surface_id = ${sqlString(surfaceID)}, updated_at = unixepoch()
+      WHERE id = ${sqlString(tabID)};`
   );
   await saveLayoutSnapshot(dbPath, worktree.id);
   return {
     worktreeID: worktree.id,
     tabID,
     surfaceID,
+    splitParentID,
+    splitDirection,
     zmxSessionID: launch.zmxSessionID,
     launch,
     env: {
@@ -481,6 +565,164 @@ async function createTerminalRecord(dbPath, { worktree, title, cwd: rawCwd, comm
       SUPACODE_SURFACE_ID: surfaceID,
     },
   };
+}
+
+async function listTabs(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const worktree = await optionalResolvedWorktree(dbPath, options);
+  const focusedTabID = options.focused ? await getSettingValue(dbPath, "selectedTabID") : null;
+  const clauses = [];
+  if (worktree) clauses.push(`t.worktree_id = ${sqlString(worktree.id)}`);
+  if (focusedTabID) clauses.push(`t.id = ${sqlString(focusedTabID)}`);
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await querySQL(
+    dbPath,
+    `SELECT t.id AS tabID, t.worktree_id AS worktreeID, t.title,
+            t.sort_order AS sortOrder, t.selected_surface_id AS selectedSurfaceID,
+            t.created_at AS createdAt, t.updated_at AS updatedAt,
+            SUM(CASE WHEN s.is_closed = 0 THEN 1 ELSE 0 END) AS openSurfaceCount
+       FROM terminal_tabs t
+       LEFT JOIN terminal_surfaces s ON s.tab_id = t.id
+       ${where}
+      GROUP BY t.id
+      HAVING openSurfaceCount > 0 OR ${options.closed ? 1 : 0} = 1
+      ORDER BY t.sort_order, t.created_at;`
+  );
+  console.log(JSON.stringify(rows, null, 2));
+}
+
+async function focusTab(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const tab = await resolveTab(dbPath, optionOrEnv(options, "tab", "SUPACODE_TAB_ID"));
+  const selectedSurfaceID = tab.selectedSurfaceID ?? (await firstOpenSurfaceID(dbPath, tab.tabID));
+  await setSelectedTerminal(dbPath, {
+    worktreeID: tab.worktreeID,
+    tabID: tab.tabID,
+    surfaceID: selectedSurfaceID,
+  });
+  console.log(JSON.stringify({ ...tab, selectedSurfaceID, focused: true }, null, 2));
+}
+
+async function newTab(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const rawWorktree = optionOrEnv(options, "worktree", "SUPACODE_WORKTREE_ID");
+  if (!rawWorktree) {
+    throw new UsageError("tab new requires --worktree or SUPACODE_WORKTREE_ID");
+  }
+  const created = await createTerminalRecord(dbPath, {
+    worktree: await resolveWorktree(dbPath, rawWorktree),
+    title: options.title,
+    cwd: options.cwd,
+    command: options.input ?? options.command,
+    tabID: options.id ?? randomUUID(),
+  });
+  console.log(JSON.stringify(created, null, 2));
+}
+
+async function closeTab(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const tab = await resolveTab(dbPath, optionOrEnv(options, "tab", "SUPACODE_TAB_ID"));
+  await execSQL(
+    dbPath,
+    `UPDATE terminal_surfaces
+        SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+      WHERE tab_id = ${sqlString(tab.tabID)};`
+  );
+  await saveLayoutSnapshot(dbPath, tab.worktreeID);
+  console.log(JSON.stringify({ tabID: tab.tabID, worktreeID: tab.worktreeID, isClosed: true }));
+}
+
+async function listSurfaces(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const worktree = await optionalResolvedWorktree(dbPath, options);
+  const tabID = optionOrEnv(options, "tab", "SUPACODE_TAB_ID");
+  const focusedSurfaceID = options.focused ? await getSettingValue(dbPath, "selectedSurfaceID") : null;
+  const clauses = [];
+  if (worktree) clauses.push(`s.worktree_id = ${sqlString(worktree.id)}`);
+  if (tabID) clauses.push(`s.tab_id = ${sqlString(tabID)}`);
+  if (focusedSurfaceID) clauses.push(`s.id = ${sqlString(focusedSurfaceID)}`);
+  if (!options.closed) clauses.push("s.is_closed = 0");
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+  const rows = await querySQL(
+    dbPath,
+    `SELECT s.id AS surfaceID, s.tab_id AS tabID, s.worktree_id AS worktreeID,
+            s.title, s.working_directory AS workingDirectory,
+            s.split_parent_id AS splitParentID, s.split_direction AS splitDirection,
+            s.zmx_session_id AS zmxSessionID, s.launch_backend AS launchBackend,
+            s.launch_plan_json AS launchPlanJSON,
+            s.launch_command AS launchCommand, s.task_status AS taskStatus,
+            s.is_closed AS isClosed, s.created_at AS createdAt, s.updated_at AS updatedAt
+       FROM terminal_surfaces s
+       ${where}
+      ORDER BY s.tab_id, s.created_at;`
+  );
+  console.log(JSON.stringify(rows.map(parseLaunchPlan), null, 2));
+}
+
+async function focusSurface(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const surface = await resolveSurface(dbPath, optionOrEnv(options, "surface", "SUPACODE_SURFACE_ID"));
+  await setSelectedTerminal(dbPath, {
+    worktreeID: surface.worktreeID,
+    tabID: surface.tabID,
+    surfaceID: surface.surfaceID,
+  });
+  if (options.input) {
+    await setSettingValue(dbPath, `pendingSurfaceInput.${surface.surfaceID}`, options.input);
+  }
+  console.log(JSON.stringify({ ...surface, focused: true, input: options.input ?? null }, null, 2));
+}
+
+async function splitSurface(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const parent = await resolveSurface(dbPath, optionOrEnv(options, "surface", "SUPACODE_SURFACE_ID"));
+  const worktree = await resolveWorktree(dbPath, parent.worktreeID);
+  const splitDirection = normalizeSplitDirection(options.direction ?? "horizontal");
+  const created = await createSurfaceRecord(dbPath, {
+    worktree,
+    tabID: parent.tabID,
+    surfaceID: options.id ?? randomUUID(),
+    title: options.title ?? parent.title,
+    cwd: options.cwd ?? parent.workingDirectory,
+    command: options.input ?? options.command,
+    splitParentID: parent.surfaceID,
+    splitDirection,
+  });
+  await setSelectedTerminal(dbPath, {
+    worktreeID: worktree.id,
+    tabID: parent.tabID,
+    surfaceID: created.surfaceID,
+  });
+  console.log(JSON.stringify(created, null, 2));
+}
+
+async function closeSurface(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const surface = await resolveSurface(dbPath, optionOrEnv(options, "surface", "SUPACODE_SURFACE_ID"));
+  await execSQL(
+    dbPath,
+    `UPDATE terminal_surfaces
+        SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+      WHERE id = ${sqlString(surface.surfaceID)};`
+  );
+  const fallbackSurfaceID = await firstOpenSurfaceID(dbPath, surface.tabID);
+  if (fallbackSurfaceID) {
+    await setSelectedTerminal(dbPath, {
+      worktreeID: surface.worktreeID,
+      tabID: surface.tabID,
+      surfaceID: fallbackSurfaceID,
+    });
+  }
+  await saveLayoutSnapshot(dbPath, surface.worktreeID);
+  console.log(JSON.stringify({ surfaceID: surface.surfaceID, isClosed: true, selectedSurfaceID: fallbackSurfaceID }));
 }
 
 async function listTerminals(argv, dbPath) {
@@ -509,21 +751,23 @@ async function closeTerminal(argv, dbPath) {
     throw new UsageError("terminal close requires --surface");
   }
   await migrate(dbPath);
-  const rows = await querySQL(
-    dbPath,
-    `SELECT worktree_id AS worktreeID FROM terminal_surfaces WHERE id = ${sqlString(options.surface)} LIMIT 1;`
-  );
-  if (rows.length === 0) {
-    throw new UsageError(`terminal surface not found: ${options.surface}`);
-  }
+  const surface = await resolveSurface(dbPath, options.surface);
   await execSQL(
     dbPath,
     `UPDATE terminal_surfaces
         SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
       WHERE id = ${sqlString(options.surface)};`
   );
-  await saveLayoutSnapshot(dbPath, rows[0].worktreeID);
-  console.log(JSON.stringify({ surfaceID: options.surface, isClosed: true }));
+  const fallbackSurfaceID = await firstOpenSurfaceID(dbPath, surface.tabID);
+  if (fallbackSurfaceID) {
+    await setSelectedTerminal(dbPath, {
+      worktreeID: surface.worktreeID,
+      tabID: surface.tabID,
+      surfaceID: fallbackSurfaceID,
+    });
+  }
+  await saveLayoutSnapshot(dbPath, surface.worktreeID);
+  console.log(JSON.stringify({ surfaceID: options.surface, isClosed: true, selectedSurfaceID: fallbackSurfaceID }));
 }
 
 async function previewAgentCommand(argv) {
@@ -976,12 +1220,41 @@ function parseGlobalArgs(argv) {
 
 function parseOptions(argv) {
   const options = { _: [] };
+  const aliases = {
+    w: "worktree",
+    t: "tab",
+    s: "surface",
+    c: "script",
+    r: "repo",
+    i: "input",
+    d: "direction",
+    n: "id",
+    f: "focused",
+  };
+  const booleanFlags = new Set(["focused", "fetch", "refresh", "unread", "dismissed", "allowUnconfirmed", "closed"]);
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg.startsWith("--")) {
-      const name = arg.slice(2);
-      options[name] = requireValue(argv, index, arg);
-      index += 1;
+      const [rawName, inlineValue] = arg.slice(2).split("=", 2);
+      if (inlineValue !== undefined) {
+        options[rawName] = inlineValue;
+      } else if (booleanFlags.has(rawName) && (argv[index + 1] === undefined || argv[index + 1].startsWith("-"))) {
+        options[rawName] = "true";
+      } else {
+        options[rawName] = requireValue(argv, index, arg);
+        index += 1;
+      }
+    } else if (/^-[A-Za-z]$/.test(arg)) {
+      const key = aliases[arg.slice(1)];
+      if (!key) {
+        throw new UsageError(`unknown option: ${arg}`);
+      }
+      if (key === "focused") {
+        options[key] = "true";
+      } else {
+        options[key] = requireValue(argv, index, arg);
+        index += 1;
+      }
     } else {
       options._.push(arg);
     }
@@ -1295,6 +1568,89 @@ async function resolveWorktree(dbPath, rawWorktree) {
     return byPath[0];
   }
   throw new UsageError(`worktree is not registered: ${rawWorktree}`);
+}
+
+async function optionalResolvedWorktree(dbPath, options) {
+  const rawWorktree = optionOrEnv(options, "worktree", "SUPACODE_WORKTREE_ID");
+  return rawWorktree ? resolveWorktree(dbPath, rawWorktree) : null;
+}
+
+async function resolveTab(dbPath, rawTab) {
+  if (!rawTab) {
+    throw new UsageError("tab id is required");
+  }
+  const rows = await querySQL(
+    dbPath,
+    `SELECT t.id AS tabID, t.worktree_id AS worktreeID, t.title,
+            t.sort_order AS sortOrder, t.selected_surface_id AS selectedSurfaceID,
+            t.created_at AS createdAt, t.updated_at AS updatedAt
+       FROM terminal_tabs t
+      WHERE t.id = ${sqlString(rawTab)}
+      LIMIT 1;`
+  );
+  if (rows.length === 1) {
+    return rows[0];
+  }
+  throw new UsageError(`tab not found: ${rawTab}`);
+}
+
+async function resolveSurface(dbPath, rawSurface) {
+  if (!rawSurface) {
+    throw new UsageError("surface id is required");
+  }
+  const rows = await querySQL(
+    dbPath,
+    `SELECT s.id AS surfaceID, s.tab_id AS tabID, s.worktree_id AS worktreeID,
+            s.title, s.working_directory AS workingDirectory,
+            s.split_parent_id AS splitParentID, s.split_direction AS splitDirection,
+            s.launch_command AS launchCommand, s.launch_backend AS launchBackend,
+            s.launch_plan_json AS launchPlanJSON, s.is_closed AS isClosed
+       FROM terminal_surfaces s
+      WHERE s.id = ${sqlString(rawSurface)}
+      LIMIT 1;`
+  );
+  if (rows.length === 1) {
+    return parseLaunchPlan(rows[0]);
+  }
+  throw new UsageError(`surface not found: ${rawSurface}`);
+}
+
+async function firstOpenSurfaceID(dbPath, tabID) {
+  const rows = await querySQL(
+    dbPath,
+    `SELECT id AS surfaceID
+       FROM terminal_surfaces
+      WHERE tab_id = ${sqlString(tabID)}
+        AND is_closed = 0
+      ORDER BY created_at
+      LIMIT 1;`
+  );
+  return rows[0]?.surfaceID ?? null;
+}
+
+async function setSelectedTerminal(dbPath, { worktreeID, tabID, surfaceID }) {
+  if (surfaceID) {
+    await execSQL(
+      dbPath,
+      `UPDATE terminal_tabs
+          SET selected_surface_id = ${sqlString(surfaceID)}, updated_at = unixepoch()
+        WHERE id = ${sqlString(tabID)};`
+    );
+    await setSettingValue(dbPath, "selectedSurfaceID", surfaceID);
+  }
+  await setSettingValue(dbPath, "selectedWorktreeID", worktreeID);
+  await setSettingValue(dbPath, "selectedTabID", tabID);
+}
+
+function normalizeSplitDirection(rawDirection) {
+  const value = String(rawDirection ?? "").toLowerCase();
+  if (value === "h" || value === "horizontal") return "horizontal";
+  if (value === "v" || value === "vertical") return "vertical";
+  throw new UsageError("--direction must be horizontal, vertical, h, or v");
+}
+
+function optionOrEnv(options, optionName, envName) {
+  return options[optionName] ?? process.env[envName] ?? null;
 }
 
 async function refreshWorktrees(dbPath, repo) {
@@ -1650,6 +2006,77 @@ async function executeDeeplink(dbPath, parsed) {
       );
       return { scriptID: parsed.scriptID, worktreeID: parsed.worktreeID };
     }
+    case "worktreeTab": {
+      const worktree = await resolveWorktree(dbPath, parsed.worktreeID);
+      const [tabPath, surfacePath, surfaceID, verb] = parsed.path;
+      if (tabPath === "new") {
+        return createTerminalRecord(dbPath, {
+          worktree,
+          command: parsed.input,
+          tabID: parsed.requestedID ?? randomUUID(),
+        });
+      }
+      if (!tabPath) {
+        return { error: "tab deeplink missing tab id" };
+      }
+      if (surfacePath === "destroy") {
+        await execSQL(
+          dbPath,
+          `UPDATE terminal_surfaces
+              SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+            WHERE tab_id = ${sqlString(tabPath)};`
+        );
+        await saveLayoutSnapshot(dbPath, worktree.id);
+        return { tabID: tabPath, isClosed: true };
+      }
+      if (surfacePath !== "surface") {
+        const tab = await resolveTab(dbPath, tabPath);
+        const selectedSurfaceID = tab.selectedSurfaceID ?? (await firstOpenSurfaceID(dbPath, tab.tabID));
+        await setSelectedTerminal(dbPath, { worktreeID: tab.worktreeID, tabID: tab.tabID, surfaceID: selectedSurfaceID });
+        return { tabID: tab.tabID, selectedSurfaceID };
+      }
+      if (!surfaceID) {
+        return { error: "surface deeplink missing surface id" };
+      }
+      const surface = await resolveSurface(dbPath, surfaceID);
+      if (verb === "destroy") {
+        await execSQL(
+          dbPath,
+          `UPDATE terminal_surfaces
+              SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+            WHERE id = ${sqlString(surface.surfaceID)};`
+        );
+        await saveLayoutSnapshot(dbPath, surface.worktreeID);
+        return { surfaceID: surface.surfaceID, isClosed: true };
+      }
+      if (verb === "split") {
+        const created = await createSurfaceRecord(dbPath, {
+          worktree,
+          tabID: surface.tabID,
+          surfaceID: parsed.requestedID ?? randomUUID(),
+          title: surface.title,
+          cwd: surface.workingDirectory,
+          command: parsed.input,
+          splitParentID: surface.surfaceID,
+          splitDirection: normalizeSplitDirection(parsed.direction ?? "horizontal"),
+        });
+        await setSelectedTerminal(dbPath, {
+          worktreeID: worktree.id,
+          tabID: surface.tabID,
+          surfaceID: created.surfaceID,
+        });
+        return created;
+      }
+      await setSelectedTerminal(dbPath, {
+        worktreeID: surface.worktreeID,
+        tabID: surface.tabID,
+        surfaceID: surface.surfaceID,
+      });
+      if (parsed.input) {
+        await setSettingValue(dbPath, `pendingSurfaceInput.${surface.surfaceID}`, parsed.input);
+      }
+      return { surfaceID: surface.surfaceID, focused: true, input: parsed.input ?? null };
+    }
     default:
       return { planned: parsed.kind };
   }
@@ -1687,6 +2114,8 @@ async function saveLayoutSnapshot(dbPath, worktreeID) {
             t.selected_surface_id AS selectedSurfaceID,
             s.id AS surfaceID, s.title AS surfaceTitle,
             s.working_directory AS workingDirectory,
+            s.split_parent_id AS splitParentID,
+            s.split_direction AS splitDirection,
             s.zmx_session_id AS zmxSessionID,
             s.launch_backend AS launchBackend,
             s.launch_plan_json AS launchPlanJSON,
@@ -1897,6 +2326,14 @@ function usage() {
   supacode-linux terminal create --worktree <worktree-id-or-path> [--title title] [--cwd path] [--command command]
   supacode-linux terminal list [--worktree <worktree-id-or-path>]
   supacode-linux terminal close --surface <surface-id>
+  supacode-linux tab list [-w <worktree-id>] [-f]
+  supacode-linux tab focus [-t <tab-id>]
+  supacode-linux tab new [-w <worktree-id>] [-i <command>] [-n <tab-id>]
+  supacode-linux tab close [-t <tab-id>]
+  supacode-linux surface list [-w <worktree-id>] [-t <tab-id>] [-f]
+  supacode-linux surface focus [-s <surface-id>] [-i <pending-input>]
+  supacode-linux surface split [-s <surface-id>] [-d horizontal|vertical] [-i <command>] [-n <surface-id>]
+  supacode-linux surface close [-s <surface-id>]
   supacode-linux github pr sync --worktree <worktree-id-or-path> [--number n] [--repo owner/name]
   supacode-linux github pr list [--worktree <worktree-id-or-path>]
   supacode-linux settings list|get|set

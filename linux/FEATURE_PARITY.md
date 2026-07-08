@@ -14,7 +14,7 @@ Status values:
 | Repository registration | Add local repositories and folders from UI/CLI | Core only | Qt add/open flow, folder support, CLI parity |
 | Git worktrees | Discover, create, archive, pin, delete, sort | Core only | Sidebar controls for create/archive/pin/delete/sort |
 | Terminal engine | Embedded Ghostty terminal | Missing | Qt host embeds Ghostty/libghostty |
-| Tabs and splits | Per-worktree tabs, surfaces, split panes | Core only | Visual tab/split UI and persistence |
+| Tabs and splits | Per-worktree tabs, surfaces, split panes | Core only | Core tab/surface commands exist; visual Ghostty split rendering remains |
 | zmx sessions | Background persistence and reattach | Core only | Qt/Ghostty attach, cleanup, crash recovery |
 | Agent presence | Live badges and attention state | Core only | Hook events update visible badges in real time |
 | Agent integrations | Managed hooks for all supported agents | Core only | Auto-install and cover all Swift-supported agents with preview/install/uninstall |
@@ -24,7 +24,7 @@ Status values:
 | Settings | Appearance, notifications, scripts, agents | Core only | Wire panes to settings persistence |
 | Scripts | Global and per-repo setup/run/archive scripts | Core only | Script editor, lifecycle wiring, and output terminal UI |
 | Remote SSH repos | SSH-backed repo/worktree/session flows | Core only | Qt flow, auth error UX, remote zmx integration |
-| CLI | Repo/worktree/tab/split automation | Core only | Command coverage matching macOS CLI surface |
+| CLI | Repo/worktree/tab/split automation | Core only | Continue filling repo/settings/socket parity and terminal-host integration |
 | Deeplinks | `supacode://` action routing | Core only | Linux desktop URL handler and UI confirmation sheet |
 | Packaging | Signed app distribution | Core only | `.deb`, AUR/PKGBUILD, AppImage smoke-tested |
 | Auto-update | Sparkle update channels on macOS | Missing | Linux update strategy chosen and documented |

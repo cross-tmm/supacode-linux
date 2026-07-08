@@ -208,6 +208,27 @@ SUPACODE_SURFACE_ID
 
 Those IDs are how agent hooks route events back to the correct surface.
 
+Use the Swift-style tab/surface commands for layout automation:
+
+```bash
+node linux/src/supacode-linux.mjs tab list -w /path/to/worktree
+node linux/src/supacode-linux.mjs tab new -w /path/to/worktree -i "codex" -n "<tab-uuid>"
+node linux/src/supacode-linux.mjs tab focus -t "<tab-uuid>"
+node linux/src/supacode-linux.mjs tab close -t "<tab-uuid>"
+
+node linux/src/supacode-linux.mjs surface list -t "<tab-uuid>"
+node linux/src/supacode-linux.mjs surface split \
+  -s "<surface-uuid>" \
+  -d vertical \
+  -i "npm test" \
+  -n "<new-surface-uuid>"
+node linux/src/supacode-linux.mjs surface focus -s "<surface-uuid>"
+node linux/src/supacode-linux.mjs surface close -s "<surface-uuid>"
+```
+
+When invoked from a Supacode terminal, these commands can default to the exported
+`SUPACODE_WORKTREE_ID`, `SUPACODE_TAB_ID`, and `SUPACODE_SURFACE_ID` values.
+
 `terminal create` also persists a launch plan. The planner prefers zmx when `zmx` is on `PATH` or
 `SUPACODE_LINUX_ZMX` points at an executable. If zmx is missing, it records a degraded shell plan
 instead of failing:

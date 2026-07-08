@@ -133,6 +133,8 @@ struct CommandPaletteEntry {
 
 struct AppSnapshot {
   QString selectedWorktreeID;
+  QString selectedTabID;
+  QString selectedSurfaceID;
   QVector<Repository> repositories;
   QVector<Worktree> worktrees;
   QVector<TerminalSurface> terminals;
@@ -186,6 +188,8 @@ public:
     if (!runJson({"app", "snapshot"}, &document, error)) return result;
     const auto root = document.object();
     result.selectedWorktreeID = jsonString(root, "selectedWorktreeID");
+    result.selectedTabID = jsonString(root, "selectedTabID");
+    result.selectedSurfaceID = jsonString(root, "selectedSurfaceID");
     for (const auto value : root.value("repositories").toArray()) {
       const auto object = value.toObject();
       result.repositories.push_back({
