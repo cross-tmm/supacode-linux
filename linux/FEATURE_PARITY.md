@@ -23,7 +23,7 @@ Status values:
 | Command palette | Fuzzy command palette for app actions | Missing | GTK command palette with keyboard flow |
 | Settings | Appearance, notifications, scripts, agents | Missing | GTK settings window |
 | Scripts | Global and per-repo setup/run/archive scripts | Missing | Script editor, runner, output terminal |
-| Remote SSH repos | SSH-backed repo/worktree/session flows | Missing | SSH transport, auth reuse, remote zmx integration |
+| Remote SSH repos | SSH-backed repo/worktree/session flows | Core only | GTK flow, auth error UX, remote zmx integration |
 | CLI | Repo/worktree/tab/split automation | Core only | Command coverage matching macOS CLI surface |
 | Deeplinks | `supacode://` action routing | Missing | Linux desktop URL handler |
 | Packaging | Signed app distribution | Core only | `.deb`, AUR/PKGBUILD, AppImage smoke-tested |

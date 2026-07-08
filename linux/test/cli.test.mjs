@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { normalizePullRequest } from "../src/github-status.mjs";
-import { spawnFile, spawnFileJSON } from "../src/utils.mjs";
+import { remoteGitCommand } from "../src/remote-git.mjs";
+import { shellQuote, spawnFile, spawnFileJSON } from "../src/utils.mjs";
 
 const cli = join(import.meta.dirname, "../src/supacode-linux.mjs");
 
@@ -55,6 +56,14 @@ test("normalizes GitHub pull request check and merge readiness", () => {
   });
   assert.equal(blocked.checksState, "failing");
   assert.equal(blocked.mergeReadiness, "checks_failing");
+});
+
+test("quotes remote git commands for SSH", () => {
+  assert.equal(shellQuote("repo's path"), "'repo'\"'\"'s path'");
+  assert.equal(
+    remoteGitCommand("/srv/repo path", ["worktree", "add", "/srv/wt path", "-b", "feature/with space"]),
+    "git -C '/srv/repo path' worktree add '/srv/wt path' -b 'feature/with space'"
+  );
 });
 
 test("previews, installs, tracks, and uninstalls managed Copilot hooks", async () => {
@@ -238,6 +247,75 @@ test("registers a git repository and creates a worktree", async () => {
     assert.equal(closed.isClosed, true);
     const summary = await spawnFileJSON("node", [cli, "--db", db, "status"]);
     assert.equal(summary.openTerminalSurfaces, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("registers an SSH repository and creates a remote worktree", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const repo = join(dir, "remote-repo");
+    await spawnFile("git", ["init", repo]);
+    await spawnFile("git", ["-C", repo, "config", "user.email", "test@example.invalid"]);
+    await spawnFile("git", ["-C", repo, "config", "user.name", "Supacode Test"]);
+    writeFileSync(join(repo, "README.md"), "# remote test\n");
+    await spawnFile("git", ["-C", repo, "add", "README.md"]);
+    await spawnFile("git", ["-C", repo, "commit", "-m", "Initial commit"]);
+
+    const fakeBin = join(dir, "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    const fakeSSH = join(fakeBin, "ssh");
+    writeFileSync(fakeSSH, '#!/usr/bin/env bash\nset -euo pipefail\ncommand="${@: -1}"\nexec bash -lc "$command"\n');
+    chmodSync(fakeSSH, 0o755);
+    const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` };
+
+    const added = await spawnFileJSON(
+      "node",
+      [
+        cli,
+        "--db",
+        db,
+        "repo",
+        "add-remote",
+        "--host",
+        "dev.example.invalid",
+        "--path",
+        repo,
+        "--name",
+        "Remote Repo",
+      ],
+      { env }
+    );
+    assert.equal(added.kind, "remote");
+    assert.equal(added.id, `remote:dev.example.invalid:${repo}`);
+    assert.equal(added.remoteHost, "dev.example.invalid");
+
+    const worktreePath = join(dir, "remote-feature");
+    const created = await spawnFileJSON(
+      "node",
+      [
+        cli,
+        "--db",
+        db,
+        "worktree",
+        "create",
+        "--repo",
+        added.id,
+        "--name",
+        "feature/ssh-core",
+        "--path",
+        worktreePath,
+      ],
+      { env }
+    );
+    assert.equal(created.repositoryID, added.id);
+    assert.equal(created.workingDirectory, worktreePath);
+
+    const worktrees = await spawnFileJSON("node", [cli, "--db", db, "worktree", "list", "--repo", added.id], { env });
+    assert.equal(worktrees.some((worktree) => worktree.branchName === "feature/ssh-core"), true);
+    assert.equal(worktrees.some((worktree) => worktree.repositoryID === added.id), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

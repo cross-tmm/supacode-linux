@@ -12,6 +12,7 @@ import {
   uninstallAgent,
 } from "./agent-integrations.mjs";
 import { normalizePullRequest, pullRequestFields } from "./github-status.mjs";
+import { remoteGitSSHArgs } from "./remote-git.mjs";
 import { spawnFile, spawnFileJSON, sqlString } from "./utils.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
@@ -437,11 +438,14 @@ async function handleRepo(subcommand, argv, dbPath) {
     case "add":
       await addRepo(argv, dbPath);
       return;
+    case "add-remote":
+      await addRemoteRepo(argv, dbPath);
+      return;
     case "list":
       await listRepos(dbPath);
       return;
     default:
-      throw new UsageError("repo requires add or list");
+      throw new UsageError("repo requires add, add-remote, or list");
   }
 }
 
@@ -463,8 +467,36 @@ async function addRepo(argv, dbPath) {
        display_name = excluded.display_name,
        last_opened_at = unixepoch();`
   );
-  await refreshWorktrees(dbPath, id, rootPath);
-  console.log(JSON.stringify({ id, rootPath, displayName }));
+  await refreshWorktrees(dbPath, { id, kind: "local", rootPath, remoteHost: "" });
+  console.log(JSON.stringify({ id, kind: "local", rootPath, remoteHost: "", displayName }));
+}
+
+async function addRemoteRepo(argv, dbPath) {
+  const options = parseOptions(argv);
+  const remoteHost = options.host;
+  const rootPath = options.path;
+  if (!remoteHost) {
+    throw new UsageError("repo add-remote requires --host");
+  }
+  if (!rootPath) {
+    throw new UsageError("repo add-remote requires --path");
+  }
+  if (!rootPath.startsWith("/")) {
+    throw new UsageError("repo add-remote --path must be an absolute remote path");
+  }
+  await migrate(dbPath);
+  const id = repositoryID("remote", rootPath, remoteHost);
+  const displayName = options.name ?? `${basename(rootPath)} on ${remoteHost}`;
+  await execSQL(
+    dbPath,
+    `INSERT INTO repositories(id, kind, root_path, remote_host, display_name)
+     VALUES (${sqlString(id)}, 'remote', ${sqlString(rootPath)}, ${sqlString(remoteHost)}, ${sqlString(displayName)})
+     ON CONFLICT(kind, root_path, remote_host) DO UPDATE SET
+       display_name = excluded.display_name,
+       last_opened_at = unixepoch();`
+  );
+  await refreshWorktrees(dbPath, { id, kind: "remote", rootPath, remoteHost });
+  console.log(JSON.stringify({ id, kind: "remote", rootPath, remoteHost, displayName }));
 }
 
 async function listRepos(dbPath) {
@@ -497,7 +529,7 @@ async function listWorktrees(argv, dbPath) {
   const options = parseOptions(argv);
   await migrate(dbPath);
   const repo = await resolveRepo(dbPath, options.repo);
-  await refreshWorktrees(dbPath, repo.id, repo.rootPath);
+  await refreshWorktrees(dbPath, repo);
   const rows = await querySQL(
     dbPath,
     `SELECT id, repository_id AS repositoryID, working_directory AS workingDirectory,
@@ -519,13 +551,17 @@ async function createWorktree(argv, dbPath) {
   }
   await migrate(dbPath);
   const repo = await resolveRepo(dbPath, options.repo);
-  const worktreePath = resolve(options.path ?? join(dirname(repo.rootPath), safePathSegment(name)));
-  const gitArgs = ["-C", repo.rootPath, "worktree", "add", worktreePath, "-b", name];
+  const worktreePath = worktreePathForRepo(repo, options.path, name);
+  const worktreeArgs = ["worktree", "add", worktreePath, "-b", name];
   if (options.base) {
-    gitArgs.push(options.base);
+    worktreeArgs.push(options.base);
   }
-  await spawnFile("git", gitArgs);
-  await refreshWorktrees(dbPath, repo.id, repo.rootPath);
+  if (repo.kind === "remote") {
+    await spawnFile("ssh", remoteGitSSHArgs(repo.remoteHost, repo.rootPath, worktreeArgs));
+  } else {
+    await spawnFile("git", ["-C", repo.rootPath, ...worktreeArgs]);
+  }
+  await refreshWorktrees(dbPath, repo);
   console.log(JSON.stringify({ repositoryID: repo.id, branchName: name, workingDirectory: worktreePath }));
 }
 
@@ -533,7 +569,10 @@ async function resolveRepo(dbPath, rawRepo) {
   if (!rawRepo) {
     const rows = await querySQL(
       dbPath,
-      `SELECT id, root_path AS rootPath FROM repositories ORDER BY last_opened_at DESC, added_at DESC LIMIT 2;`
+      `SELECT id, kind, root_path AS rootPath, COALESCE(remote_host, '') AS remoteHost
+         FROM repositories
+        ORDER BY last_opened_at DESC, added_at DESC
+        LIMIT 2;`
     );
     if (rows.length === 1) {
       return rows[0];
@@ -543,17 +582,28 @@ async function resolveRepo(dbPath, rawRepo) {
 
   const byID = await querySQL(
     dbPath,
-    `SELECT id, root_path AS rootPath FROM repositories WHERE id = ${sqlString(rawRepo)} LIMIT 1;`
+    `SELECT id, kind, root_path AS rootPath, COALESCE(remote_host, '') AS remoteHost
+       FROM repositories
+      WHERE id = ${sqlString(rawRepo)}
+      LIMIT 1;`
   );
   if (byID.length === 1) {
     return byID[0];
   }
 
-  const rootPath = await gitRepoRoot(rawRepo);
+  let rootPath;
+  try {
+    rootPath = await gitRepoRoot(rawRepo);
+  } catch (error) {
+    throw new UsageError(`repository is not registered: ${rawRepo}`);
+  }
   const id = repositoryID("local", rootPath);
   const rows = await querySQL(
     dbPath,
-    `SELECT id, root_path AS rootPath FROM repositories WHERE id = ${sqlString(id)} LIMIT 1;`
+    `SELECT id, kind, root_path AS rootPath, COALESCE(remote_host, '') AS remoteHost
+       FROM repositories
+      WHERE id = ${sqlString(id)}
+      LIMIT 1;`
   );
   if (rows.length === 1) {
     return rows[0];
@@ -587,18 +637,21 @@ async function resolveWorktree(dbPath, rawWorktree) {
   throw new UsageError(`worktree is not registered: ${rawWorktree}`);
 }
 
-async function refreshWorktrees(dbPath, repositoryIDValue, repoPath) {
-  const entries = parseWorktreePorcelain(
-    await spawnFile("git", ["-C", repoPath, "worktree", "list", "--porcelain"])
-  );
+async function refreshWorktrees(dbPath, repo) {
+  const output =
+    repo.kind === "remote"
+      ? await spawnFile("ssh", remoteGitSSHArgs(repo.remoteHost, repo.rootPath, ["worktree", "list", "--porcelain"]))
+      : await spawnFile("git", ["-C", repo.rootPath, "worktree", "list", "--porcelain"]);
+  const entries = parseWorktreePorcelain(output);
   for (const entry of entries) {
-    const id = worktreeID(repositoryIDValue, entry.workingDirectory);
+    const id = worktreeID(repo.id, entry.workingDirectory);
+    const isMissing = repo.kind === "local" && !existsSync(entry.workingDirectory);
     await execSQL(
       dbPath,
       `INSERT INTO worktrees(id, repository_id, working_directory, branch_name, detail, is_attached, is_missing, last_seen_at)
-       VALUES (${sqlString(id)}, ${sqlString(repositoryIDValue)}, ${sqlString(entry.workingDirectory)},
-               ${sqlString(entry.branchName)}, ${sqlString(relativeDetail(repoPath, entry.workingDirectory))},
-               ${entry.isAttached ? 1 : 0}, ${existsSync(entry.workingDirectory) ? 0 : 1}, unixepoch())
+       VALUES (${sqlString(id)}, ${sqlString(repo.id)}, ${sqlString(entry.workingDirectory)},
+               ${sqlString(entry.branchName)}, ${sqlString(relativeDetail(repo.rootPath, entry.workingDirectory))},
+               ${entry.isAttached ? 1 : 0}, ${isMissing ? 1 : 0}, unixepoch())
        ON CONFLICT(repository_id, working_directory) DO UPDATE SET
          branch_name = excluded.branch_name,
          detail = excluded.detail,
@@ -711,6 +764,7 @@ async function doctor() {
   const checks = [
     ["git", ["--version"]],
     ["gh", ["--version"]],
+    ["ssh", ["-V"]],
     ["sqlite3", ["-version"]],
     ["node", ["--version"]],
     ["pkg-config", ["--version"]],
@@ -719,7 +773,8 @@ async function doctor() {
   for (const [command, args] of checks) {
     try {
       const output = await spawnFile(command, args);
-      results.push({ command, ok: true, version: output.split("\n")[0] });
+      const version = output.split("\n")[0];
+      results.push(version ? { command, ok: true, version } : { command, ok: true });
     } catch (error) {
       results.push({ command, ok: false, error: error.message });
     }
@@ -787,8 +842,8 @@ async function gitRepoRoot(path) {
   return realpathSync(output.trim());
 }
 
-function repositoryID(kind, rootPath) {
-  return `${kind}:${rootPath}`;
+function repositoryID(kind, rootPath, remoteHost = "") {
+  return kind === "remote" ? `${kind}:${remoteHost}:${rootPath}` : `${kind}:${rootPath}`;
 }
 
 function worktreeID(repositoryIDValue, workingDirectory) {
@@ -801,6 +856,16 @@ function basename(path) {
 
 function safePathSegment(value) {
   return value.replaceAll("/", "-").replaceAll("..", ".");
+}
+
+function worktreePathForRepo(repo, rawPath, name) {
+  if (repo.kind !== "remote") {
+    return resolve(rawPath ?? join(dirname(repo.rootPath), safePathSegment(name)));
+  }
+  if (!rawPath) {
+    return join(dirname(repo.rootPath), safePathSegment(name));
+  }
+  return rawPath.startsWith("/") ? rawPath : join(dirname(repo.rootPath), rawPath);
 }
 
 function relativeDetail(repoPath, workingDirectory) {
@@ -817,6 +882,7 @@ function usage() {
   supacode-linux init [--db path]
   supacode-linux status [--db path]
   supacode-linux repo add <path> [--name display-name] [--db path]
+  supacode-linux repo add-remote --host <ssh-host> --path <absolute-remote-repo-path> [--name display-name] [--db path]
   supacode-linux repo list [--db path]
   supacode-linux worktree list --repo <repo-id-or-path> [--db path]
   supacode-linux worktree create --repo <repo-id-or-path> --name <branch> [--base ref] [--path path] [--db path]

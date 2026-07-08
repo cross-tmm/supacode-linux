@@ -6,7 +6,7 @@ pkgdesc='Linux command center for coding agents'
 arch=('any')
 url='https://github.com/cross-tmm/supacode-linux'
 license=('custom:FSL-1.1-ALv2')
-depends=('git' 'github-cli' 'gjs' 'gtk4' 'libadwaita' 'nodejs' 'sqlite')
+depends=('git' 'github-cli' 'gjs' 'gtk4' 'libadwaita' 'nodejs' 'openssh' 'sqlite')
 makedepends=()
 source=("$pkgname::git+https://github.com/cross-tmm/supacode-linux.git")
 sha256sums=('SKIP')
@@ -23,6 +23,7 @@ package() {
   install -Dm755 "linux/src/app/agent-workbench.gjs" "$pkgdir/usr/lib/agent-workbench/app/agent-workbench.gjs"
   install -Dm644 "linux/src/supacode-linux.mjs" "$pkgdir/usr/lib/supacode-linux/supacode-linux.mjs"
   install -Dm644 "linux/src/utils.mjs" "$pkgdir/usr/lib/supacode-linux/utils.mjs"
+  install -Dm644 "linux/src/remote-git.mjs" "$pkgdir/usr/lib/supacode-linux/remote-git.mjs"
   install -Dm644 "linux/src/agent-integrations.mjs" "$pkgdir/usr/lib/supacode-linux/agent-integrations.mjs"
   install -Dm644 "linux/src/github-status.mjs" "$pkgdir/usr/lib/supacode-linux/github-status.mjs"
   install -Dm644 "linux/state/migrations/0001_initial.sql" \

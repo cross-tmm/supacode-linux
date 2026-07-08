@@ -51,6 +51,7 @@ const WorkbenchWindow = GObject.registerClass(
       this.terminals = [];
       this.agents = [];
       this.prs = [];
+      this.refreshErrors = [];
 
       const toolbarView = new Adw.ToolbarView();
       const header = new Adw.HeaderBar();
@@ -130,9 +131,14 @@ const WorkbenchWindow = GObject.registerClass(
         this.prs = parseCoreJSON(["github", "pr", "list"], []);
         this.terminals = parseCoreJSON(["terminal", "list"], []);
         this.worktrees = [];
+        this.refreshErrors = [];
         for (const repo of this.repositories) {
-          const repoWorktrees = parseCoreJSON(["worktree", "list", "--repo", repo.rootPath], []);
-          this.worktrees.push(...repoWorktrees);
+          try {
+            const repoWorktrees = parseCoreJSON(["worktree", "list", "--repo", repo.id], []);
+            this.worktrees.push(...repoWorktrees);
+          } catch (error) {
+            this.refreshErrors.push(`${repo.displayName || repo.rootPath}: ${error.message}`);
+          }
         }
         this.render();
       } catch (error) {
@@ -142,7 +148,11 @@ const WorkbenchWindow = GObject.registerClass(
 
     render() {
       fillList(this.repositoryList, this.repositories, (repo) =>
-        row(repo.displayName || repo.rootPath, repo.rootPath, "folder-symbolic")
+        row(
+          repo.displayName || repo.rootPath,
+          repo.kind === "remote" ? `${repo.remoteHost}:${repo.rootPath}` : repo.rootPath,
+          repo.kind === "remote" ? "network-server-symbolic" : "folder-symbolic"
+        )
       );
       fillList(this.worktreeList, this.worktrees, (worktree) =>
         row(worktree.branchName || worktree.workingDirectory, worktree.detail || worktree.workingDirectory, "vcs-branch-symbolic")
@@ -156,9 +166,11 @@ const WorkbenchWindow = GObject.registerClass(
       fillList(this.prList, this.prs, (pr) =>
         row(`#${pr.number} ${pr.title}`, `${pr.checksState} / ${pr.mergeReadiness}`, "vcs-merge-request-symbolic")
       );
-      this.statusLabel.set_label(
+      const status =
         `${this.repositories.length} repositories, ${this.worktrees.length} worktrees, ` +
-          `${this.terminals.filter((terminal) => !terminal.isClosed).length} open surfaces`
+        `${this.terminals.filter((terminal) => !terminal.isClosed).length} open surfaces`;
+      this.statusLabel.set_label(
+        this.refreshErrors.length > 0 ? `${status}. ${this.refreshErrors.length} repository refresh errors.` : status
       );
     }
 

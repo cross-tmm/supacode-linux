@@ -17,6 +17,7 @@ terminal host.
 - CLI entrypoint at `linux/src/supacode-linux.mjs`.
 - Repository registration and listing.
 - Git worktree discovery and creation.
+- SSH-backed remote repository registration and worktree discovery/creation.
 - Terminal tab/surface ID allocation, layout snapshot persistence, listing, and closure.
 - Auto-installed managed hooks with preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
@@ -33,7 +34,7 @@ These are required before claiming "no feature difference" with the Swift app:
 - zmx-backed live session attach/reattach.
 - Sidebar UI, tab strip, split panes, search UI, command palette, settings window, and menus.
 - System notifications and sounds.
-- Remote SSH repository UI and session transport.
+- Remote SSH repository UI and zmx session transport.
 - Global/per-repo scripts UI.
 - Deeplink handling.
 - Full agent integration coverage beyond Codex and Copilot.
@@ -49,6 +50,7 @@ Minimum runtime requirements for the current CLI core:
 - Node.js 20+.
 - SQLite 3.44+.
 - Git.
+- OpenSSH client.
 - GitHub CLI (`gh`) for PR/check status.
 
 Future GTK host requirements:
@@ -63,7 +65,7 @@ Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git gh nodejs sqlite3 pkg-config
+sudo apt-get install -y git gh nodejs openssh-client sqlite3 pkg-config
 
 # Required later for the GTK host:
 sudo apt-get install -y gjs libgtk-4-dev libadwaita-1-dev
@@ -72,7 +74,7 @@ sudo apt-get install -y gjs libgtk-4-dev libadwaita-1-dev
 Arch Linux:
 
 ```bash
-sudo pacman -S git github-cli nodejs sqlite pkgconf
+sudo pacman -S git github-cli nodejs openssh sqlite pkgconf
 
 # Required later for the GTK host:
 sudo pacman -S gjs gtk4 libadwaita
@@ -136,6 +138,37 @@ node linux/src/supacode-linux.mjs worktree create \
   --repo /path/to/repo \
   --name task/example
 ```
+
+Register an SSH repository:
+
+```bash
+node linux/src/supacode-linux.mjs repo add-remote \
+  --host user@example.com \
+  --path /srv/projects/repo \
+  --name "Remote repo"
+```
+
+Remote repositories use IDs shaped like:
+
+```text
+remote:user@example.com:/srv/projects/repo
+```
+
+List and create remote worktrees:
+
+```bash
+node linux/src/supacode-linux.mjs worktree list \
+  --repo remote:user@example.com:/srv/projects/repo
+
+node linux/src/supacode-linux.mjs worktree create \
+  --repo remote:user@example.com:/srv/projects/repo \
+  --name task/remote-example \
+  --path /srv/projects/task-remote-example
+```
+
+SSH execution is key/agent based and uses `BatchMode=yes` with a short connection timeout, so it
+will not stop the desktop shell on password prompts. Run `ssh user@example.com` once first if you
+need to accept the host key or configure agent/key access.
 
 Allocate terminal layout state for a worktree:
 
@@ -253,6 +286,7 @@ What this verifies:
 - Required CLI tools are available.
 - SQLite migrations apply from scratch.
 - Repository/worktree flows work against a temporary Git repository.
+- Remote SSH repository/worktree flows work through an SSH command shim.
 - Terminal layout state is persisted.
 - Codex and Copilot hook safety behavior works.
 - GitHub PR/check normalization works.
@@ -264,7 +298,7 @@ What this does not verify yet:
 
 - Full UI/UX parity.
 - Embedded terminal rendering.
-- Session attach/reattach.
+- Local and remote zmx session attach/reattach.
 - Desktop notifications.
 - Real distro package installation.
 

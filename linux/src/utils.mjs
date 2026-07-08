@@ -43,3 +43,7 @@ export function sqlString(value) {
 export function sqlIdent(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
+
+export function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\"'\"'")}'`;
+}

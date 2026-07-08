@@ -22,6 +22,7 @@ Depends:
  libadwaita-1-0,
  libgtk-4-1,
  nodejs,
+ openssh-client,
  sqlite3,
  ${misc:Depends}
 Description: Linux command center for coding agents

@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: "22"
       - name: Install runtime tools
-        run: sudo apt-get update && sudo apt-get install -y git gh sqlite3 pkg-config gjs gir1.2-gtk-4.0 gir1.2-adw-1 xvfb dbus-x11
+        run: sudo apt-get update && sudo apt-get install -y git gh openssh-client sqlite3 pkg-config gjs gir1.2-gtk-4.0 gir1.2-adw-1 xvfb dbus-x11
       - name: Doctor
         run: make linux-doctor
       - name: State migration
