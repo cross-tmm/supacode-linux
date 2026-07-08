@@ -3,4 +3,4 @@ set -euo pipefail
 
 appdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export APPDIR="$appdir"
-exec "$appdir/usr/bin/agent-workbench" "$@"
+exec "$appdir/usr/bin/supacode" "$@"

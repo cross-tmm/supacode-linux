@@ -1,0 +1,15 @@
+<RCC>
+  <qresource prefix="/">
+    <file alias="icons/app.png">../../../supacode/Assets.xcassets/AppIcon.appiconset/appicon-macOS-Dark-256x256@1x.png</file>
+    <file alias="icons/git-default.svg">../../../supacode/Assets.xcassets/git-default.imageset/git-default.svg</file>
+    <file alias="icons/git-branch.svg">../../../supacode/Assets.xcassets/git-branch.imageset/git-branch.svg</file>
+    <file alias="icons/git-pull-request.svg">../../../supacode/Assets.xcassets/git-pull-request.imageset/git-pull-request.svg</file>
+    <file alias="icons/git-pull-request-draft.svg">../../../supacode/Assets.xcassets/git-pull-request-draft.imageset/git-pull-request-draft.svg</file>
+    <file alias="icons/git-pull-request-closed.svg">../../../supacode/Assets.xcassets/git-pull-request-closed.imageset/git-pull-request-closed.svg</file>
+    <file alias="icons/git-merge.svg">../../../supacode/Assets.xcassets/git-merge.imageset/git-merge.svg</file>
+    <file alias="icons/git-merge-queue.svg">../../../supacode/Assets.xcassets/git-merge-queue.imageset/git-merge-queue.svg</file>
+    <file alias="icons/github-mark.svg">../../../supacode/Assets.xcassets/github-mark.imageset/github-mark.svg</file>
+    <file alias="icons/codex-mark.svg">../../../supacode/Assets.xcassets/codex-mark.imageset/codex-mark.svg</file>
+    <file alias="icons/copilot-mark.svg">../../../supacode/Assets.xcassets/copilot-mark.imageset/copilot-mark.svg</file>
+  </qresource>
+</RCC>

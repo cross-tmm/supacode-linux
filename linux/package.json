@@ -1,10 +1,9 @@
 {
-  "name": "agent-workbench-core",
+  "name": "supacode-linux-core",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "agent-workbench": "src/app/agent-workbench.gjs",
     "supacode-linux": "src/supacode-linux.mjs"
   },
   "scripts": {

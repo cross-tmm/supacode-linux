@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Agent Workbench
-Comment=Command center for coding agents
-Exec=agent-workbench
-Icon=agent-workbench
-Terminal=false
-Categories=Development;TerminalEmulator;

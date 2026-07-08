@@ -1,15 +1,14 @@
 # Linux Packaging
 
-Packaging currently installs the Agent Workbench GTK shell, Linux core CLI, SQLite migrations,
-and desktop metadata.
+Packaging currently installs the Supacode Qt shell, Linux core CLI, SQLite migrations, and
+desktop metadata.
 
 Run `make linux-package-check` before committing packaging changes.
 
 ## Ubuntu/Debian
 
-The Debian metadata declares runtime dependencies on `git`, `gh`, `nodejs`, `openssh-client`,
-and `sqlite3`.
-GTK/libadwaita are build dependencies for the planned native host.
+The Debian metadata declares runtime dependencies on `git`, `gh`, Qt6 libraries, `nodejs`,
+`openssh-client`, and `sqlite3`. Qt6 is also required at build time.
 
 Build the current package:
 
@@ -17,14 +16,14 @@ Build the current package:
 make linux-build-deb VERSION=0.1.0
 ```
 
-The artifact is written to `build/linux/deb/agent-workbench_0.1.0_all.deb`.
+The artifact is written to `build/linux/deb/supacode_0.1.0_<arch>.deb`.
 
 ## Arch
 
-`arch/PKGBUILD` installs the same CLI core and migrations, depends on `openssh` for remote
-repositories, and is structured for eventual AUR use.
+`arch/PKGBUILD` builds the Qt shell, installs the same CLI core and migrations, depends on
+`openssh` for remote repositories, and is structured for eventual AUR use.
 
 ## AppImage
 
 The AppImage files provide the desktop entry and launcher contract. A full AppImage build recipe
-will be added once the GTK host produces an app binary.
+will be added after the Qt package smoke flow is stable.

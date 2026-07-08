@@ -2,13 +2,13 @@
 
 ## Boundaries
 
-The Linux implementation is split into a headless core and a future GTK terminal host.
+The Linux implementation is split into a headless core and a native Qt terminal host.
 
 - The core owns persistence, repository/worktree commands, settings IO, packageable CLI behavior,
   terminal surface ID allocation, zmx/shell/SSH launch plans, and layout snapshots.
 - GitHub status is pulled through `gh` and normalized before being written to SQLite. The app
   never stores GitHub credentials.
-- The GTK host should own windows, sidebar rendering, command palette, terminal tabs/splits, and
+- The Qt host owns windows, sidebar rendering, command palette, terminal tabs/splits, and
   notification presentation.
 - Ghostty/libghostty should remain the terminal implementation. Do not rebuild terminal rendering
   with xterm.js for the main product path.
@@ -39,8 +39,8 @@ Runtime default paths:
 
 The Linux package should eventually install:
 
-- `supacode-linux` app binary
-- `supacode-linux-cli` or compatible CLI entrypoint
+- `supacode` app binary
+- `supacode-linux` core CLI entrypoint
 - desktop entry
 - icon assets
 - license and documentation

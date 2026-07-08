@@ -1,15 +1,21 @@
-# Maintainer: Agent Workbench Maintainers <maintainers@example.invalid>
-pkgname=agent-workbench
+# Maintainer: Supacode Maintainers <maintainers@example.invalid>
+pkgname=supacode
 pkgver=0.1.0
 pkgrel=1
-pkgdesc='Linux command center for coding agents'
-arch=('any')
+pkgdesc='Terminal-native command center for coding agents'
+arch=('x86_64' 'aarch64')
 url='https://github.com/cross-tmm/supacode-linux'
 license=('custom:FSL-1.1-ALv2')
-depends=('git' 'github-cli' 'gjs' 'gtk4' 'libadwaita' 'nodejs' 'openssh' 'sqlite')
-makedepends=()
+depends=('git' 'github-cli' 'nodejs' 'openssh' 'qt6-base' 'qt6-svg' 'sqlite')
+makedepends=('cmake' 'gcc' 'pkgconf')
 source=("$pkgname::git+https://github.com/cross-tmm/supacode-linux.git")
 sha256sums=('SKIP')
+
+build() {
+  cd "$srcdir/$pkgname"
+  cmake -S linux/qt -B build/linux/qt -DCMAKE_BUILD_TYPE=RelWithDebInfo
+  cmake --build build/linux/qt
+}
 
 check() {
   cd "$srcdir/$pkgname"
@@ -18,9 +24,8 @@ check() {
 
 package() {
   cd "$srcdir/$pkgname"
-  install -Dm755 "linux/packaging/bin/agent-workbench" "$pkgdir/usr/bin/agent-workbench"
+  install -Dm755 "build/linux/qt/supacode" "$pkgdir/usr/bin/supacode"
   install -Dm755 "linux/packaging/bin/supacode-linux" "$pkgdir/usr/bin/supacode-linux"
-  install -Dm755 "linux/src/app/agent-workbench.gjs" "$pkgdir/usr/lib/agent-workbench/app/agent-workbench.gjs"
   install -Dm644 "linux/src/supacode-linux.mjs" "$pkgdir/usr/lib/supacode-linux/supacode-linux.mjs"
   install -Dm644 "linux/src/utils.mjs" "$pkgdir/usr/lib/supacode-linux/utils.mjs"
   install -Dm644 "linux/src/remote-git.mjs" "$pkgdir/usr/lib/supacode-linux/remote-git.mjs"
@@ -37,7 +42,7 @@ package() {
     "$pkgdir/usr/share/supacode-linux/state/migrations/0004_github_pull_requests.sql"
   install -Dm644 "linux/state/migrations/0005_terminal_launch_plan.sql" \
     "$pkgdir/usr/share/supacode-linux/state/migrations/0005_terminal_launch_plan.sql"
-  install -Dm644 "linux/packaging/appimage/agent-workbench.desktop" \
-    "$pkgdir/usr/share/applications/agent-workbench.desktop"
+  install -Dm644 "linux/packaging/appimage/supacode.desktop" \
+    "$pkgdir/usr/share/applications/supacode.desktop"
   install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

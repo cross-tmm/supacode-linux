@@ -1,6 +1,5 @@
-linux/packaging/bin/agent-workbench usr/bin/
+build/linux/qt/supacode usr/bin/
 linux/packaging/bin/supacode-linux usr/bin/
-linux/src/app/agent-workbench.gjs usr/lib/agent-workbench/app/
 linux/src/supacode-linux.mjs usr/lib/supacode-linux/
 linux/src/utils.mjs usr/lib/supacode-linux/
 linux/src/remote-git.mjs usr/lib/supacode-linux/
@@ -8,4 +7,4 @@ linux/src/terminal-launch.mjs usr/lib/supacode-linux/
 linux/src/agent-integrations.mjs usr/lib/supacode-linux/
 linux/src/github-status.mjs usr/lib/supacode-linux/
 linux/state/migrations usr/share/supacode-linux/state/
-linux/packaging/appimage/agent-workbench.desktop usr/share/applications/
+linux/packaging/appimage/supacode.desktop usr/share/applications/

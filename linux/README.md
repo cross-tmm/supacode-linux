@@ -5,10 +5,11 @@ parity with the macOS Swift app: worktree-first coding-agent workflows, persiste
 sessions, agent presence, notifications, GitHub PR state, command palette, scripts, CLI, and
 native packaging for Ubuntu and Arch.
 
-Current status: the Linux core is implemented and verified, and a GTK/libadwaita shell exists
-under the working name Agent Workbench. Embedded Ghostty terminals and full UI/UX parity are not
-implemented yet, so feature parity cannot be claimed until the shell is upgraded into the full
-terminal host.
+Current status: the Linux core is implemented and verified, and a native Qt shell now recreates
+the Supacode split-view structure, sidebar/detail routing, command palette shell, settings shell,
+and terminal launch-plan display. Embedded Ghostty terminals and complete workflow parity are not
+finished yet, so feature parity cannot be claimed until the terminal host and remaining reducers
+are wired end to end.
 
 ## Implemented Now
 
@@ -23,8 +24,9 @@ terminal host.
 - Auto-installed managed hooks with preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
 - GitHub PR/check state normalization through `gh`.
-- GTK/libadwaita desktop shell that reads core state and auto-installs supported managed hooks.
-- Ubuntu/Debian, Arch, and AppImage packaging metadata.
+- Qt desktop shell that reads core state and renders the Supacode sidebar/detail/command-palette
+  structure.
+- Ubuntu/Debian, Arch, and AppImage packaging metadata for the `supacode` binary.
 - GitHub Actions workflow for Linux core verification.
 
 ## Not Implemented Yet
@@ -32,14 +34,14 @@ terminal host.
 These are required before claiming "no feature difference" with the Swift app:
 
 - Embedded Ghostty terminal surfaces.
-- Embedded zmx-backed live session attach/reattach in the GTK/Ghostty host.
-- Sidebar UI, tab strip, split panes, search UI, command palette, settings window, and menus.
+- Embedded zmx-backed live session attach/reattach in the Qt/Ghostty host.
+- Real Ghostty split panes and terminal search overlay.
 - System notifications and sounds.
-- Remote SSH repository UI and zmx session transport.
+- Fully wired remote SSH forms and zmx session transport.
 - Global/per-repo scripts UI.
 - Deeplink handling.
 - Full agent integration coverage beyond Codex and Copilot.
-- Real `.deb`, AUR, and AppImage release artifacts.
+- AUR and AppImage release artifacts.
 
 See [`FEATURE_PARITY.md`](FEATURE_PARITY.md) for the release gate.
 
@@ -54,11 +56,12 @@ Minimum runtime requirements for the current CLI core:
 - OpenSSH client.
 - GitHub CLI (`gh`) for PR/check status.
 
-Future GTK host requirements:
+Qt shell build requirements:
 
-- GJS.
-- GTK4 development package.
-- libadwaita development package.
+- CMake.
+- C++ compiler.
+- Qt6 base development package.
+- Qt6 SVG development package.
 - Ghostty/libghostty build dependencies.
 - zmx when persistent sessions are enabled. Without it, terminal launch plans degrade to shell
   mode.
@@ -69,8 +72,8 @@ Ubuntu:
 sudo apt-get update
 sudo apt-get install -y git gh nodejs openssh-client sqlite3 pkg-config
 
-# Required later for the GTK host:
-sudo apt-get install -y gjs libgtk-4-dev libadwaita-1-dev
+# Required for the Qt shell:
+sudo apt-get install -y cmake g++ qt6-base-dev qt6-svg-dev
 ```
 
 Arch Linux:
@@ -78,8 +81,8 @@ Arch Linux:
 ```bash
 sudo pacman -S git github-cli nodejs openssh sqlite pkgconf
 
-# Required later for the GTK host:
-sudo pacman -S gjs gtk4 libadwaita
+# Required for the Qt shell:
+sudo pacman -S cmake gcc qt6-base qt6-svg
 ```
 
 ## Setup
@@ -296,6 +299,8 @@ make linux-doctor
 make linux-state-check
 make linux-test
 make linux-package-check
+make linux-qt-build
+make linux-qt-check
 make linux-build-deb
 make linux-ui-check
 ```
@@ -310,19 +315,18 @@ What this verifies:
 - Codex and Copilot hook safety behavior works.
 - GitHub PR/check normalization works.
 - Packaging metadata is present and shell launchers parse.
-- GTK/libadwaita shell imports and, when `xvfb-run` is available, launches against a temporary
-  home/database without touching real agent configs.
+- Qt shell builds and can render a headless screenshot when Qt build dependencies are installed.
 
 What this does not verify yet:
 
 - Full UI/UX parity.
 - Embedded terminal rendering.
-- Embedded local and remote zmx attach/reattach in the GTK/Ghostty host.
+- Embedded local and remote zmx attach/reattach in the Qt/Ghostty host.
 - Desktop notifications.
 - Real distro package installation.
 
-Those checks must be added with Playwright/dogtail/screenshot-based GTK tests once the visual
-host exists.
+Those checks must be expanded with screenshot baselines and interaction tests as the Qt visual
+host is wired to the remaining workflows.
 
 ## Packaging Status
 
@@ -342,13 +346,13 @@ make linux-build-deb VERSION=0.1.0
 The artifact is written to:
 
 ```text
-build/linux/deb/agent-workbench_0.1.0_all.deb
+build/linux/deb/supacode_0.1.0_amd64.deb
 ```
 
 Install it on Ubuntu 24.04+:
 
 ```bash
-sudo apt install ./build/linux/deb/agent-workbench_0.1.0_all.deb
+sudo apt install ./build/linux/deb/supacode_0.1.0_amd64.deb
 ```
 
 The Arch and AppImage files are not release-ready artifacts yet. Before release, package
@@ -370,12 +374,12 @@ Before a Linux release can claim parity with the Swift app:
 
 ## Development Notes
 
-The chosen stack remains Ghostty GTK/libadwaita for the UI/terminal host. Electron is not the
-mainline implementation because terminal correctness, native key handling, PTY behavior, and
-session restoration are core product requirements.
+The chosen stack is Qt6 for the Linux desktop shell with Ghostty/libghostty for terminal
+embedding. Electron is not the mainline implementation because terminal correctness, native key
+handling, PTY behavior, and session restoration are core product requirements.
 
 ## License and Branding
 
 Upstream Supacode is licensed under FSL-1.1-ALv2 and restricts competing commercial use before
-the future Apache 2.0 grant. Clear licensing and trademark usage before distributing a public
-Linux product under the Supacode name.
+the future Apache 2.0 grant. This fork currently uses Supacode branding per project direction;
+clear licensing and trademark usage before distributing a public Linux product.

@@ -1,7 +1,7 @@
 import { shellQuote } from "./utils.mjs";
 
 const safeShellToken = /^[A-Za-z0-9_./:=@%+-]+$/;
-const defaultControlPath = "~/.ssh/agent-workbench-%C";
+const defaultControlPath = "~/.ssh/supacode-%C";
 const backgroundProbeOptions = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"];
 const interactiveOptions = ["-o", "ConnectTimeout=30"];
 

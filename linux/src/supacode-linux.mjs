@@ -816,36 +816,36 @@ async function doctor() {
         }
   );
   try {
-    const gjs = await spawnFile("gjs", ["--version"]);
-    results.push({ command: "gjs", ok: true, optional: true, version: gjs.trim() });
+    const cmake = await spawnFile("cmake", ["--version"]);
+    results.push({ command: "cmake", ok: true, optional: true, version: cmake.split("\n")[0] });
   } catch (error) {
     results.push({
-      command: "gjs",
+      command: "cmake",
       ok: false,
       optional: true,
-      error: "Install gjs before launching the GTK shell",
+      error: "Install cmake before building the Qt shell",
     });
   }
   try {
-    const gtk = await spawnFile("pkg-config", ["--modversion", "gtk4"]);
-    results.push({ command: "gtk4", ok: true, optional: true, version: gtk.trim() });
+    const qt = await spawnFile("pkg-config", ["--modversion", "Qt6Widgets"]);
+    results.push({ command: "Qt6Widgets", ok: true, optional: true, version: qt.trim() });
   } catch (error) {
     results.push({
-      command: "gtk4",
+      command: "Qt6Widgets",
       ok: false,
       optional: true,
-      error: "Install libgtk-4-dev on Ubuntu or gtk4 on Arch before building the GTK host",
+      error: "Install qt6-base-dev on Ubuntu or qt6-base on Arch before building the Qt shell",
     });
   }
   try {
-    const adwaita = await spawnFile("pkg-config", ["--modversion", "libadwaita-1"]);
-    results.push({ command: "libadwaita-1", ok: true, optional: true, version: adwaita.trim() });
+    const qtSvg = await spawnFile("pkg-config", ["--modversion", "Qt6Svg"]);
+    results.push({ command: "Qt6Svg", ok: true, optional: true, version: qtSvg.trim() });
   } catch (error) {
     results.push({
-      command: "libadwaita-1",
+      command: "Qt6Svg",
       ok: false,
       optional: true,
-      error: "Install libadwaita-1-dev on Ubuntu or libadwaita on Arch",
+      error: "Install qt6-svg-dev on Ubuntu or qt6-svg on Arch before building the Qt shell",
     });
   }
   console.log(JSON.stringify(results, null, 2));

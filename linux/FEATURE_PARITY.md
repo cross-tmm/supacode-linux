@@ -11,19 +11,19 @@ Status values:
 
 | Area | macOS Swift app behavior | Linux status | Release requirement |
 | --- | --- | --- | --- |
-| Repository registration | Add local repositories and folders from UI/CLI | Core only | GTK add/open flow, folder support, CLI parity |
+| Repository registration | Add local repositories and folders from UI/CLI | Core only | Qt add/open flow, folder support, CLI parity |
 | Git worktrees | Discover, create, archive, pin, delete, sort | Core only | Sidebar controls for create/archive/pin/delete/sort |
-| Terminal engine | Embedded Ghostty terminal | Missing | GTK host embeds Ghostty/libghostty |
+| Terminal engine | Embedded Ghostty terminal | Missing | Qt host embeds Ghostty/libghostty |
 | Tabs and splits | Per-worktree tabs, surfaces, split panes | Core only | Visual tab/split UI and persistence |
-| zmx sessions | Background persistence and reattach | Core only | GTK/Ghostty attach, cleanup, crash recovery |
+| zmx sessions | Background persistence and reattach | Core only | Qt/Ghostty attach, cleanup, crash recovery |
 | Agent presence | Live badges and attention state | Core only | Hook events update visible badges in real time |
 | Agent integrations | Managed hooks for all supported agents | Core only | Auto-install and cover all Swift-supported agents with preview/install/uninstall |
 | Notifications | In-app and system notifications with sound | Missing | Notification center, sound, click-to-focus |
 | GitHub PR/check state | Sidebar PR/check/merge readiness | Core only | Visible badges and refresh strategy |
-| Command palette | Fuzzy command palette for app actions | Missing | GTK command palette with keyboard flow |
-| Settings | Appearance, notifications, scripts, agents | Missing | GTK settings window |
+| Command palette | Fuzzy command palette for app actions | Core only | Full action coverage and keyboard parity |
+| Settings | Appearance, notifications, scripts, agents | Core only | Wire panes to settings persistence |
 | Scripts | Global and per-repo setup/run/archive scripts | Missing | Script editor, runner, output terminal |
-| Remote SSH repos | SSH-backed repo/worktree/session flows | Core only | GTK flow, auth error UX, remote zmx integration |
+| Remote SSH repos | SSH-backed repo/worktree/session flows | Core only | Qt flow, auth error UX, remote zmx integration |
 | CLI | Repo/worktree/tab/split automation | Core only | Command coverage matching macOS CLI surface |
 | Deeplinks | `supacode://` action routing | Missing | Linux desktop URL handler |
 | Packaging | Signed app distribution | Core only | `.deb`, AUR/PKGBUILD, AppImage smoke-tested |
@@ -51,4 +51,4 @@ Additional future UI checks:
 - Open settings and install/uninstall each supported agent integration.
 
 The current repository does not yet satisfy the full parity gate because the Linux shell does not
-yet embed Ghostty terminals or implement the full command-center UI.
+yet embed Ghostty terminals or implement every Swift workflow end to end.
