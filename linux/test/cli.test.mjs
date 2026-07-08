@@ -16,6 +16,7 @@ test("initializes state database and reports status", async () => {
     assert.equal(status.dbPath, db);
     assert.equal(status.repositories, 0);
     assert.equal(status.worktrees, 0);
+    assert.equal(status.openTerminalSurfaces, 0);
     assert.equal(status.agentEvents, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -148,6 +149,41 @@ test("registers a git repository and creates a worktree", async () => {
     const worktrees = await spawnFileJSON("node", [cli, "--db", db, "worktree", "list", "--repo", repo]);
     assert.equal(worktrees.length, 2);
     assert.ok(worktrees.some((worktree) => worktree.branchName === "feature/linux-core"));
+
+    const createdTerminal = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "terminal",
+      "create",
+      "--worktree",
+      worktreePath,
+      "--title",
+      "Feature task",
+      "--command",
+      "codex",
+    ]);
+    assert.equal(createdTerminal.env.SUPACODE_WORKTREE_ID.includes("worktree:"), true);
+    assert.equal(createdTerminal.env.SUPACODE_TAB_ID, createdTerminal.tabID);
+    assert.equal(createdTerminal.env.SUPACODE_SURFACE_ID, createdTerminal.surfaceID);
+
+    const terminals = await spawnFileJSON("node", [cli, "--db", db, "terminal", "list", "--worktree", worktreePath]);
+    assert.equal(terminals.length, 1);
+    assert.equal(terminals[0].title, "Feature task");
+    assert.equal(terminals[0].launchCommand, "codex");
+
+    const closed = await spawnFileJSON("node", [
+      cli,
+      "--db",
+      db,
+      "terminal",
+      "close",
+      "--surface",
+      createdTerminal.surfaceID,
+    ]);
+    assert.equal(closed.isClosed, true);
+    const summary = await spawnFileJSON("node", [cli, "--db", db, "status"]);
+    assert.equal(summary.openTerminalSurfaces, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -4,8 +4,8 @@
 
 The Linux implementation is split into a headless core and a future GTK terminal host.
 
-- The core owns persistence, repository/worktree commands, settings IO, and packageable CLI
-  behavior.
+- The core owns persistence, repository/worktree commands, settings IO, packageable CLI behavior,
+  terminal surface ID allocation, and layout snapshots.
 - The GTK host should own windows, sidebar rendering, command palette, terminal tabs/splits, and
   notification presentation.
 - Ghostty/libghostty should remain the terminal implementation. Do not rebuild terminal rendering

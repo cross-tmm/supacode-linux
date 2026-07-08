@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -38,6 +39,9 @@ async function main(argv) {
         return;
       case "worktree":
         await handleWorktree(subcommand, rest, dbPath);
+        return;
+      case "terminal":
+        await handleTerminal(subcommand, rest, dbPath);
         return;
       case "agent":
         await handleAgent(subcommand, rest, dbPath);
@@ -91,6 +95,101 @@ async function handleAgent(subcommand, argv, dbPath) {
     default:
       throw new UsageError("agent requires list, preview, status, install, uninstall, or event");
   }
+}
+
+async function handleTerminal(subcommand, argv, dbPath) {
+  switch (subcommand) {
+    case "create":
+      await createTerminal(argv, dbPath);
+      return;
+    case "list":
+      await listTerminals(argv, dbPath);
+      return;
+    case "close":
+      await closeTerminal(argv, dbPath);
+      return;
+    default:
+      throw new UsageError("terminal requires create, list, or close");
+  }
+}
+
+async function createTerminal(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.worktree) {
+    throw new UsageError("terminal create requires --worktree");
+  }
+  await migrate(dbPath);
+  const worktree = await resolveWorktree(dbPath, options.worktree);
+  const tabID = randomUUID();
+  const surfaceID = randomUUID();
+  const title = options.title ?? worktree.branchName ?? basename(worktree.workingDirectory);
+  const cwd = resolve(options.cwd ?? worktree.workingDirectory);
+  const launchCommand = options.command ?? null;
+  await execSQL(
+    dbPath,
+    `INSERT INTO terminal_tabs(id, worktree_id, title, sort_order, selected_surface_id)
+     VALUES (${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(title)}, 0, ${sqlString(surfaceID)});`
+  );
+  await execSQL(
+    dbPath,
+    `INSERT INTO terminal_surfaces(id, tab_id, worktree_id, title, working_directory, launch_command, task_status)
+     VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(title)},
+             ${sqlString(cwd)}, ${sqlString(launchCommand)}, 'idle');`
+  );
+  await saveLayoutSnapshot(dbPath, worktree.id);
+  console.log(
+    JSON.stringify({
+      worktreeID: worktree.id,
+      tabID,
+      surfaceID,
+      env: {
+        SUPACODE_WORKTREE_ID: worktree.id,
+        SUPACODE_TAB_ID: tabID,
+        SUPACODE_SURFACE_ID: surfaceID,
+      },
+    })
+  );
+}
+
+async function listTerminals(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const worktree = options.worktree ? await resolveWorktree(dbPath, options.worktree) : null;
+  const where = worktree ? `WHERE s.worktree_id = ${sqlString(worktree.id)}` : "";
+  const rows = await querySQL(
+    dbPath,
+    `SELECT s.id AS surfaceID, s.tab_id AS tabID, s.worktree_id AS worktreeID,
+            s.title, s.working_directory AS workingDirectory,
+            s.launch_command AS launchCommand, s.task_status AS taskStatus,
+            s.is_closed AS isClosed, s.created_at AS createdAt, s.updated_at AS updatedAt
+       FROM terminal_surfaces s
+       ${where}
+      ORDER BY s.is_closed, s.updated_at DESC, s.created_at DESC;`
+  );
+  console.log(JSON.stringify(rows, null, 2));
+}
+
+async function closeTerminal(argv, dbPath) {
+  const options = parseOptions(argv);
+  if (!options.surface) {
+    throw new UsageError("terminal close requires --surface");
+  }
+  await migrate(dbPath);
+  const rows = await querySQL(
+    dbPath,
+    `SELECT worktree_id AS worktreeID FROM terminal_surfaces WHERE id = ${sqlString(options.surface)} LIMIT 1;`
+  );
+  if (rows.length === 0) {
+    throw new UsageError(`terminal surface not found: ${options.surface}`);
+  }
+  await execSQL(
+    dbPath,
+    `UPDATE terminal_surfaces
+        SET is_closed = 1, updated_at = unixepoch(), task_status = 'idle'
+      WHERE id = ${sqlString(options.surface)};`
+  );
+  await saveLayoutSnapshot(dbPath, rows[0].worktreeID);
+  console.log(JSON.stringify({ surfaceID: options.surface, isClosed: true }));
 }
 
 async function previewAgentCommand(argv) {
@@ -346,6 +445,32 @@ async function resolveRepo(dbPath, rawRepo) {
   throw new UsageError(`repository is not registered: ${rawRepo}`);
 }
 
+async function resolveWorktree(dbPath, rawWorktree) {
+  const byID = await querySQL(
+    dbPath,
+    `SELECT id, working_directory AS workingDirectory, branch_name AS branchName
+       FROM worktrees
+      WHERE id = ${sqlString(rawWorktree)}
+      LIMIT 1;`
+  );
+  if (byID.length === 1) {
+    return byID[0];
+  }
+
+  const path = resolve(rawWorktree);
+  const byPath = await querySQL(
+    dbPath,
+    `SELECT id, working_directory AS workingDirectory, branch_name AS branchName
+       FROM worktrees
+      WHERE working_directory = ${sqlString(path)}
+      LIMIT 1;`
+  );
+  if (byPath.length === 1) {
+    return byPath[0];
+  }
+  throw new UsageError(`worktree is not registered: ${rawWorktree}`);
+}
+
 async function refreshWorktrees(dbPath, repositoryIDValue, repoPath) {
   const entries = parseWorktreePorcelain(
     await spawnFile("git", ["-C", repoPath, "worktree", "list", "--porcelain"])
@@ -403,18 +528,44 @@ async function status(dbPath) {
   const [worktreeCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM worktrees;");
   const [notificationCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM notifications WHERE is_read = 0;");
   const [agentEventCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM agent_events;");
+  const [surfaceCount] = await querySQL(dbPath, "SELECT count(*) AS count FROM terminal_surfaces WHERE is_closed = 0;");
   console.log(
     JSON.stringify(
       {
         dbPath,
         repositories: repoCount.count,
         worktrees: worktreeCount.count,
+        openTerminalSurfaces: surfaceCount.count,
         unreadNotifications: notificationCount.count,
         agentEvents: agentEventCount.count,
       },
       null,
       2
     )
+  );
+}
+
+async function saveLayoutSnapshot(dbPath, worktreeID) {
+  const rows = await querySQL(
+    dbPath,
+    `SELECT t.id AS tabID, t.title AS tabTitle, t.sort_order AS sortOrder,
+            t.selected_surface_id AS selectedSurfaceID,
+            s.id AS surfaceID, s.title AS surfaceTitle,
+            s.working_directory AS workingDirectory,
+            s.launch_command AS launchCommand, s.task_status AS taskStatus,
+            s.is_closed AS isClosed
+       FROM terminal_tabs t
+       LEFT JOIN terminal_surfaces s ON s.tab_id = t.id
+      WHERE t.worktree_id = ${sqlString(worktreeID)}
+      ORDER BY t.sort_order, t.created_at, s.created_at;`
+  );
+  await execSQL(
+    dbPath,
+    `INSERT INTO terminal_layout_snapshots(worktree_id, layout_json, updated_at)
+     VALUES (${sqlString(worktreeID)}, ${sqlString(JSON.stringify({ tabs: rows }))}, unixepoch())
+     ON CONFLICT(worktree_id) DO UPDATE SET
+       layout_json = excluded.layout_json,
+       updated_at = excluded.updated_at;`
   );
 }
 
@@ -540,6 +691,9 @@ function usage() {
   supacode-linux repo list [--db path]
   supacode-linux worktree list --repo <repo-id-or-path> [--db path]
   supacode-linux worktree create --repo <repo-id-or-path> --name <branch> [--base ref] [--path path] [--db path]
+  supacode-linux terminal create --worktree <worktree-id-or-path> [--title title] [--cwd path] [--command command]
+  supacode-linux terminal list [--worktree <worktree-id-or-path>]
+  supacode-linux terminal close --surface <surface-id>
   supacode-linux agent list
   supacode-linux agent preview <agent> [--home path]
   supacode-linux agent status [agent] [--home path] [--db path]
