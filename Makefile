@@ -35,7 +35,7 @@ SUPACODE_SKIP_PREFLIGHT ?=
 SELECT_DEVELOPER_DIR = DEVELOPER_DIR="$$(./scripts/select-developer-dir.sh)"; export DEVELOPER_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app run-app install-dev-build archive export-archive format lint check test bump-version bump-and-release log-stream linux-doctor linux-state-db linux-state-check linux-test linux-package-check linux-verify
+.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app run-app install-dev-build archive export-archive format lint check test bump-version bump-and-release log-stream linux-doctor linux-state-db linux-state-check linux-test linux-package-check linux-ui-check linux-verify
 
 ifdef CI
 TUIST_INSTALL_FLAGS := --force-resolved-versions
@@ -102,6 +102,9 @@ linux-test: # Run Linux core tests
 
 linux-package-check: # Validate Linux packaging metadata
 	@bash linux/scripts/check-packaging.sh
+
+linux-ui-check: # Verify the Linux GTK shell loads without launching a display session
+	@bash linux/scripts/check-ui.sh
 
 linux-verify: # Run all Linux verification checks
 	@bash linux/scripts/verify.sh

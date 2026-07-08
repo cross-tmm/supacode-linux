@@ -7,10 +7,12 @@ required_files=(
   "$root/linux/packaging/debian/control"
   "$root/linux/packaging/debian/rules"
   "$root/linux/packaging/debian/install"
+  "$root/linux/packaging/bin/agent-workbench"
   "$root/linux/packaging/bin/supacode-linux"
   "$root/linux/packaging/arch/PKGBUILD"
-  "$root/linux/packaging/appimage/supacode-linux.desktop"
+  "$root/linux/packaging/appimage/agent-workbench.desktop"
   "$root/linux/packaging/appimage/AppRun"
+  "$root/linux/src/app/agent-workbench.gjs"
 )
 
 for file in "${required_files[@]}"; do
@@ -21,6 +23,7 @@ for file in "${required_files[@]}"; do
 done
 
 bash -n "$root/linux/packaging/debian/rules"
+bash -n "$root/linux/packaging/bin/agent-workbench"
 bash -n "$root/linux/packaging/bin/supacode-linux"
 bash -n "$root/linux/packaging/appimage/AppRun"
 

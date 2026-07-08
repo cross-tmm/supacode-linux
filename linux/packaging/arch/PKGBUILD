@@ -1,12 +1,12 @@
-# Maintainer: Supacode Linux Maintainers <maintainers@example.invalid>
-pkgname=supacode-linux
+# Maintainer: Agent Workbench Maintainers <maintainers@example.invalid>
+pkgname=agent-workbench
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Linux command center for coding agents'
 arch=('any')
 url='https://github.com/cross-tmm/supacode-linux'
 license=('custom:FSL-1.1-ALv2')
-depends=('git' 'github-cli' 'nodejs' 'sqlite')
+depends=('git' 'github-cli' 'gjs' 'gtk4' 'libadwaita' 'nodejs' 'sqlite')
 makedepends=()
 source=("$pkgname::git+https://github.com/cross-tmm/supacode-linux.git")
 sha256sums=('SKIP')
@@ -18,7 +18,9 @@ check() {
 
 package() {
   cd "$srcdir/$pkgname"
+  install -Dm755 "linux/packaging/bin/agent-workbench" "$pkgdir/usr/bin/agent-workbench"
   install -Dm755 "linux/packaging/bin/supacode-linux" "$pkgdir/usr/bin/supacode-linux"
+  install -Dm755 "linux/src/app/agent-workbench.gjs" "$pkgdir/usr/lib/agent-workbench/app/agent-workbench.gjs"
   install -Dm644 "linux/src/supacode-linux.mjs" "$pkgdir/usr/lib/supacode-linux/supacode-linux.mjs"
   install -Dm644 "linux/src/utils.mjs" "$pkgdir/usr/lib/supacode-linux/utils.mjs"
   install -Dm644 "linux/src/agent-integrations.mjs" "$pkgdir/usr/lib/supacode-linux/agent-integrations.mjs"
@@ -31,7 +33,7 @@ package() {
     "$pkgdir/usr/share/supacode-linux/state/migrations/0003_terminal_launch_state.sql"
   install -Dm644 "linux/state/migrations/0004_github_pull_requests.sql" \
     "$pkgdir/usr/share/supacode-linux/state/migrations/0004_github_pull_requests.sql"
-  install -Dm644 "linux/packaging/appimage/supacode-linux.desktop" \
-    "$pkgdir/usr/share/applications/supacode-linux.desktop"
+  install -Dm644 "linux/packaging/appimage/agent-workbench.desktop" \
+    "$pkgdir/usr/share/applications/agent-workbench.desktop"
   install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

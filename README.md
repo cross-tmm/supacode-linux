@@ -12,10 +12,10 @@ connection loses nothing.
 
 ## Linux port
 
-This fork includes a Linux implementation track under [`linux/`](linux/README.md). The first
-slice is a runnable Node + SQLite core for repository/worktree state and distro packaging
-metadata; the GUI/terminal host is designed to plug into Ghostty's GTK frontend rather than
-reimplement terminal behavior in Electron.
+This fork includes a Linux implementation track under [`linux/`](linux/README.md). It now has a
+runnable Node + SQLite core, packaging metadata, and a GTK/libadwaita shell under the distinct
+working name Agent Workbench; the remaining terminal host work is designed to embed Ghostty
+rather than reimplement terminal behavior in Electron.
 
 The Linux target is not UI/UX or feature-parity complete yet. See
 [`linux/FEATURE_PARITY.md`](linux/FEATURE_PARITY.md) for the parity gate and

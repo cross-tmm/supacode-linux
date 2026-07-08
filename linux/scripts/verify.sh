@@ -20,6 +20,9 @@ node --test linux/test/*.test.mjs
 echo "==> Packaging metadata"
 bash linux/scripts/check-packaging.sh
 
+echo "==> GTK shell import"
+bash linux/scripts/check-ui.sh
+
 echo "==> CLI help"
 node linux/src/supacode-linux.mjs --help >/dev/null
 

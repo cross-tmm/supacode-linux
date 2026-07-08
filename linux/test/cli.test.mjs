@@ -127,6 +127,26 @@ test("installs Codex hooks into an owned hooks file", async () => {
   }
 });
 
+test("auto-installs all supported managed hooks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
+  try {
+    const db = join(dir, "state.sqlite3");
+    const home = join(dir, "home");
+    const results = await spawnFileJSON("node", [cli, "--db", db, "agent", "auto-install", "--home", home]);
+    assert.deepEqual(
+      results.map((result) => [result.agent, result.state]),
+      [
+        ["codex", "installed"],
+        ["copilot", "installed"],
+      ]
+    );
+    assert.equal(existsSync(join(home, ".codex/hooks.json")), true);
+    assert.equal(existsSync(join(home, ".copilot/hooks/supacode.json")), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("refuses to overwrite unmanaged agent hook files", async () => {
   const dir = mkdtempSync(join(tmpdir(), "supacode-linux-test-"));
   try {

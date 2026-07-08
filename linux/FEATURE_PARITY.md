@@ -17,7 +17,7 @@ Status values:
 | Tabs and splits | Per-worktree tabs, surfaces, split panes | Core only | Visual tab/split UI and persistence |
 | zmx sessions | Background persistence and reattach | Missing | zmx attach/reattach, cleanup, crash recovery |
 | Agent presence | Live badges and attention state | Core only | Hook events update visible badges in real time |
-| Agent integrations | Managed hooks for all supported agents | Core only | Cover all Swift-supported agents with preview/install/uninstall |
+| Agent integrations | Managed hooks for all supported agents | Core only | Auto-install and cover all Swift-supported agents with preview/install/uninstall |
 | Notifications | In-app and system notifications with sound | Missing | Notification center, sound, click-to-focus |
 | GitHub PR/check state | Sidebar PR/check/merge readiness | Core only | Visible badges and refresh strategy |
 | Command palette | Fuzzy command palette for app actions | Missing | GTK command palette with keyboard flow |
@@ -28,7 +28,7 @@ Status values:
 | Deeplinks | `supacode://` action routing | Missing | Linux desktop URL handler |
 | Packaging | Signed app distribution | Core only | `.deb`, AUR/PKGBUILD, AppImage smoke-tested |
 | Auto-update | Sparkle update channels on macOS | Missing | Linux update strategy chosen and documented |
-| UI/UX | Native command-center experience | Missing | Screenshot/interaction tests pass on Ubuntu and Arch |
+| UI/UX | Native command-center experience | Core only | Screenshot/interaction tests pass on Ubuntu and Arch |
 
 ## Verification Required Before Release
 
@@ -50,5 +50,5 @@ Additional future UI checks:
 - Sync GitHub PR state and verify sidebar badges.
 - Open settings and install/uninstall each supported agent integration.
 
-The current repository does not yet satisfy the full parity gate because the Linux visual host is
-not implemented.
+The current repository does not yet satisfy the full parity gate because the Linux shell does not
+yet embed Ghostty terminals or implement the full command-center UI.

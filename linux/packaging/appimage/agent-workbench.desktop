@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Supacode Linux
+Name=Agent Workbench
 Comment=Command center for coding agents
-Exec=supacode-linux
-Icon=supacode-linux
+Exec=agent-workbench
+Icon=agent-workbench
 Terminal=false
 Categories=Development;TerminalEmulator;

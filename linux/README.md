@@ -5,10 +5,10 @@ parity with the macOS Swift app: worktree-first coding-agent workflows, persiste
 sessions, agent presence, notifications, GitHub PR state, command palette, scripts, CLI, and
 native packaging for Ubuntu and Arch.
 
-Current status: the Linux core is implemented and verified; the visual GTK/Ghostty host is not
-implemented yet. That means repository/worktree state, SQLite migrations, agent hooks, terminal
-layout metadata, and GitHub PR/check normalization work from the CLI, but UI/UX parity cannot be
-claimed or screenshot-tested until the GTK host lands.
+Current status: the Linux core is implemented and verified, and a GTK/libadwaita shell exists
+under the working name Agent Workbench. Embedded Ghostty terminals and full UI/UX parity are not
+implemented yet, so feature parity cannot be claimed until the shell is upgraded into the full
+terminal host.
 
 ## Implemented Now
 
@@ -18,9 +18,10 @@ claimed or screenshot-tested until the GTK host lands.
 - Repository registration and listing.
 - Git worktree discovery and creation.
 - Terminal tab/surface ID allocation, layout snapshot persistence, listing, and closure.
-- Safe managed-hook preview/status/install/uninstall for Codex and Copilot.
+- Auto-installed managed hooks with preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
 - GitHub PR/check state normalization through `gh`.
+- GTK/libadwaita desktop shell that reads core state and auto-installs supported managed hooks.
 - Ubuntu/Debian, Arch, and AppImage packaging metadata.
 - GitHub Actions workflow for Linux core verification.
 
@@ -28,7 +29,6 @@ claimed or screenshot-tested until the GTK host lands.
 
 These are required before claiming "no feature difference" with the Swift app:
 
-- GTK/libadwaita visual host.
 - Embedded Ghostty terminal surfaces.
 - zmx-backed live session attach/reattach.
 - Sidebar UI, tab strip, split panes, search UI, command palette, settings window, and menus.
@@ -53,6 +53,7 @@ Minimum runtime requirements for the current CLI core:
 
 Future GTK host requirements:
 
+- GJS.
 - GTK4 development package.
 - libadwaita development package.
 - Ghostty/libghostty build dependencies.
@@ -65,7 +66,7 @@ sudo apt-get update
 sudo apt-get install -y git gh nodejs sqlite3 pkg-config
 
 # Required later for the GTK host:
-sudo apt-get install -y libgtk-4-dev libadwaita-1-dev
+sudo apt-get install -y gjs libgtk-4-dev libadwaita-1-dev
 ```
 
 Arch Linux:
@@ -74,7 +75,7 @@ Arch Linux:
 sudo pacman -S git github-cli nodejs sqlite pkgconf
 
 # Required later for the GTK host:
-sudo pacman -S gtk4 libadwaita
+sudo pacman -S gjs gtk4 libadwaita
 ```
 
 ## Setup
@@ -171,11 +172,17 @@ node linux/src/supacode-linux.mjs agent preview codex
 node linux/src/supacode-linux.mjs agent preview copilot
 ```
 
-Install managed hooks:
+Install managed hooks manually:
 
 ```bash
 node linux/src/supacode-linux.mjs agent install codex
 node linux/src/supacode-linux.mjs agent install copilot
+```
+
+Auto-install all supported managed hooks, matching the desktop app's first-launch behavior:
+
+```bash
+node linux/src/supacode-linux.mjs agent auto-install
 ```
 
 Check hook state:
@@ -238,6 +245,7 @@ make linux-doctor
 make linux-state-check
 make linux-test
 make linux-package-check
+make linux-ui-check
 ```
 
 What this verifies:
@@ -249,10 +257,12 @@ What this verifies:
 - Codex and Copilot hook safety behavior works.
 - GitHub PR/check normalization works.
 - Packaging metadata is present and shell launchers parse.
+- GTK/libadwaita shell imports and, when `xvfb-run` is available, launches against a temporary
+  home/database without touching real agent configs.
 
 What this does not verify yet:
 
-- UI/UX layout.
+- Full UI/UX parity.
 - Embedded terminal rendering.
 - Session attach/reattach.
 - Desktop notifications.

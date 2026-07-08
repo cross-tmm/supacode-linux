@@ -181,6 +181,9 @@ async function handleAgent(subcommand, argv, dbPath) {
     case "install":
       await installAgentCommand(argv, dbPath);
       return;
+    case "auto-install":
+      await autoInstallAgents(argv, dbPath);
+      return;
     case "uninstall":
       await uninstallAgentCommand(argv, dbPath);
       return;
@@ -188,8 +191,26 @@ async function handleAgent(subcommand, argv, dbPath) {
       await recordAgentEvent(argv, dbPath);
       return;
     default:
-      throw new UsageError("agent requires list, preview, status, install, uninstall, or event");
+      throw new UsageError("agent requires list, preview, status, auto-install, install, uninstall, or event");
   }
+}
+
+async function autoInstallAgents(argv, dbPath) {
+  const options = parseOptions(argv);
+  await migrate(dbPath);
+  const home = options.home ?? homedir();
+  const results = [];
+  for (const agent of supportedAgents) {
+    try {
+      const state = installAgent(agent, home);
+      await recordAgentState(execSQL, dbPath, agent, state);
+      results.push({ agent, state, installed: state === "installed" });
+    } catch (error) {
+      await recordAgentState(execSQL, dbPath, agent, "failed", error.message);
+      results.push({ agent, state: "failed", installed: false, error: error.message });
+    }
+  }
+  console.log(JSON.stringify(results, null, 2));
 }
 
 async function handleTerminal(subcommand, argv, dbPath) {
@@ -704,6 +725,17 @@ async function doctor() {
     }
   }
   try {
+    const gjs = await spawnFile("gjs", ["--version"]);
+    results.push({ command: "gjs", ok: true, optional: true, version: gjs.trim() });
+  } catch (error) {
+    results.push({
+      command: "gjs",
+      ok: false,
+      optional: true,
+      error: "Install gjs before launching the GTK shell",
+    });
+  }
+  try {
     const gtk = await spawnFile("pkg-config", ["--modversion", "gtk4"]);
     results.push({ command: "gtk4", ok: true, optional: true, version: gtk.trim() });
   } catch (error) {
@@ -796,6 +828,7 @@ function usage() {
   supacode-linux agent list
   supacode-linux agent preview <agent> [--home path]
   supacode-linux agent status [agent] [--home path] [--db path]
+  supacode-linux agent auto-install [--home path] [--db path]
   supacode-linux agent install <agent> [--home path] [--db path]
   supacode-linux agent uninstall <agent> [--home path] [--db path]
   supacode-linux agent event --agent <agent> --event <event> [--surface id] [--worktree id] [--tab id] [--db path]`);

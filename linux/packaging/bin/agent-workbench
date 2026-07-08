@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${APPDIR:-}" ] && [ -f "$APPDIR/usr/lib/agent-workbench/app/agent-workbench.gjs" ]; then
+  export AGENT_WORKBENCH_CORE="$APPDIR/usr/bin/supacode-linux"
+  exec gjs -m "$APPDIR/usr/lib/agent-workbench/app/agent-workbench.gjs" "$@"
+fi
+
+export AGENT_WORKBENCH_CORE="${AGENT_WORKBENCH_CORE:-/usr/bin/supacode-linux}"
+exec gjs -m /usr/lib/agent-workbench/app/agent-workbench.gjs "$@"
