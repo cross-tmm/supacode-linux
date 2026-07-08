@@ -1,0 +1,29 @@
+# Maintainer: Supacode Linux Maintainers <maintainers@example.invalid>
+pkgname=supacode-linux
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Linux command center for coding agents'
+arch=('any')
+url='https://github.com/cross-tmm/supacode-linux'
+license=('custom:FSL-1.1-ALv2')
+depends=('git' 'github-cli' 'nodejs' 'sqlite')
+makedepends=()
+source=("$pkgname::git+https://github.com/cross-tmm/supacode-linux.git")
+sha256sums=('SKIP')
+
+check() {
+  cd "$srcdir/$pkgname"
+  node --test linux/test/*.test.mjs
+}
+
+package() {
+  cd "$srcdir/$pkgname"
+  install -Dm755 "linux/packaging/bin/supacode-linux" "$pkgdir/usr/bin/supacode-linux"
+  install -Dm644 "linux/src/supacode-linux.mjs" "$pkgdir/usr/lib/supacode-linux/supacode-linux.mjs"
+  install -Dm644 "linux/src/utils.mjs" "$pkgdir/usr/lib/supacode-linux/utils.mjs"
+  install -Dm644 "linux/state/migrations/0001_initial.sql" \
+    "$pkgdir/usr/share/supacode-linux/state/migrations/0001_initial.sql"
+  install -Dm644 "linux/packaging/appimage/supacode-linux.desktop" \
+    "$pkgdir/usr/share/applications/supacode-linux.desktop"
+  install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Supacode Linux
+Comment=Command center for coding agents
+Exec=supacode-linux
+Icon=supacode-linux
+Terminal=false
+Categories=Development;TerminalEmulator;

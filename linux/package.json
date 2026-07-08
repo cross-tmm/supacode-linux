@@ -1,0 +1,17 @@
+{
+  "name": "supacode-linux-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "supacode-linux": "src/supacode-linux.mjs"
+  },
+  "scripts": {
+    "doctor": "node src/supacode-linux.mjs doctor",
+    "test": "node --test test/*.test.mjs",
+    "state-check": "node src/supacode-linux.mjs init --db /tmp/supacode-linux-state-check.sqlite3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

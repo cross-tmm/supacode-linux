@@ -1,0 +1,25 @@
+Source: supacode-linux
+Section: devel
+Priority: optional
+Maintainer: Supacode Linux Maintainers <maintainers@example.invalid>
+Standards-Version: 4.7.0
+Build-Depends:
+ debhelper-compat (= 13),
+ libadwaita-1-dev,
+ libgtk-4-dev,
+ nodejs,
+ pkg-config,
+ sqlite3
+Homepage: https://github.com/cross-tmm/supacode-linux
+
+Package: supacode-linux
+Architecture: all
+Depends:
+ git,
+ gh,
+ nodejs,
+ sqlite3,
+ ${misc:Depends}
+Description: Linux command center for coding agents
+ Supacode Linux manages repository worktrees, terminal sessions, and coding
+ agent presence from a native Linux desktop app.

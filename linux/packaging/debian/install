@@ -1,0 +1,5 @@
+linux/packaging/bin/supacode-linux usr/bin/
+linux/src/supacode-linux.mjs usr/lib/supacode-linux/
+linux/src/utils.mjs usr/lib/supacode-linux/
+linux/state/migrations usr/share/supacode-linux/state/
+linux/packaging/appimage/supacode-linux.desktop usr/share/applications/

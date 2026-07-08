@@ -20,6 +20,7 @@ TUIST_RELEASE_GENERATION_STAMP := $(TUIST_GENERATION_STAMP_DIR)/development-rele
 TUIST_GENERATION_INPUTS := Project.swift Workspace.swift Tuist.swift Tuist/Package.swift $(wildcard Tuist/Package.resolved) $(PROJECT_CONFIG_PATH) mise.toml scripts/build-ghostty.sh scripts/build-zmx.sh
 TUIST_GENERATE_CACHE_PROFILE ?= development
 TUIST_CACHE_CONFIGURATION ?= Debug
+LINUX_STATE_DB ?= /tmp/supacode-linux-state.sqlite3
 VERSION ?=
 BUILD ?=
 TITLE ?=
@@ -34,7 +35,7 @@ SUPACODE_SKIP_PREFLIGHT ?=
 SELECT_DEVELOPER_DIR = DEVELOPER_DIR="$$(./scripts/select-developer-dir.sh)"; export DEVELOPER_DIR
 
 .DEFAULT_GOAL := help
-.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app run-app install-dev-build archive export-archive format lint check test bump-version bump-and-release log-stream
+.PHONY: doctor preflight build-ghostty-xcframework build-zmx generate-project generate-project-sources inspect-dependencies warm-cache build-app run-app install-dev-build archive export-archive format lint check test bump-version bump-and-release log-stream linux-doctor linux-state-db linux-state-check linux-test linux-package-check
 
 ifdef CI
 TUIST_INSTALL_FLAGS := --force-resolved-versions
@@ -82,6 +83,25 @@ $(TUIST_RELEASE_GENERATION_STAMP): $(TUIST_GENERATION_INPUTS) $(TUIST_INSTALL_ST
 
 doctor: # Diagnose build prerequisites and print the fix for each failure
 	@./scripts/doctor.sh
+
+linux-doctor: # Diagnose Linux port prerequisites
+	@node linux/src/supacode-linux.mjs doctor
+
+linux-state-db: # Create or migrate a Linux SQLite state database
+	@node linux/src/supacode-linux.mjs init --db "$(LINUX_STATE_DB)"
+
+linux-state-check: # Verify the Linux SQLite schema can be applied
+	@tmp_db="$${TMPDIR:-/tmp}/supacode-linux-state-check.sqlite3"; \
+	rm -f "$$tmp_db" "$$tmp_db-shm" "$$tmp_db-wal"; \
+	node linux/src/supacode-linux.mjs init --db "$$tmp_db"; \
+	sqlite3 "$$tmp_db" "select name from sqlite_schema where type = 'table' order by name;"; \
+	rm -f "$$tmp_db" "$$tmp_db-shm" "$$tmp_db-wal"
+
+linux-test: # Run Linux core tests
+	@node --test linux/test/*.test.mjs
+
+linux-package-check: # Validate Linux packaging metadata
+	@bash linux/scripts/check-packaging.sh
 
 # Order-only preflight on the install stamp, so every build flow fails fast with
 # doctor's actionable message before tuist / xcodebuild / zig run. Never forces a

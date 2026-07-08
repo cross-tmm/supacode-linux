@@ -10,6 +10,13 @@ connection loses nothing.
 
 ![screenshot](https://www.supacode.sh/screenshot.png)
 
+## Linux port
+
+This fork includes a Linux implementation track under [`linux/`](linux/README.md). The first
+slice is a runnable Node + SQLite core for repository/worktree state and distro packaging
+metadata; the GUI/terminal host is designed to plug into Ghostty's GTK frontend rather than
+reimplement terminal behavior in Electron.
+
 ## Features
 
 ### Worktree-first workflow

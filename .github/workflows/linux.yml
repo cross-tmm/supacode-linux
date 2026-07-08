@@ -1,0 +1,35 @@
+name: Linux
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/linux.yml"
+      - "linux/**"
+      - "Makefile"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/linux.yml"
+      - "linux/**"
+      - "Makefile"
+
+jobs:
+  core:
+    name: Core checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runtime tools
+        run: sudo apt-get update && sudo apt-get install -y git gh sqlite3 pkg-config
+      - name: Doctor
+        run: make linux-doctor
+      - name: State migration
+        run: make linux-state-check
+      - name: Tests
+        run: make linux-test
+      - name: Packaging metadata
+        run: make linux-package-check

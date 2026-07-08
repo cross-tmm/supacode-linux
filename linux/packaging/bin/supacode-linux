@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -n "${APPDIR:-}" ] && [ -f "$APPDIR/usr/lib/supacode-linux/supacode-linux.mjs" ]; then
+  export SUPACODE_LINUX_MIGRATION_DIR="$APPDIR/usr/share/supacode-linux/state/migrations"
+  exec node "$APPDIR/usr/lib/supacode-linux/supacode-linux.mjs" "$@"
+fi
+
+export SUPACODE_LINUX_MIGRATION_DIR="${SUPACODE_LINUX_MIGRATION_DIR:-/usr/share/supacode-linux/state/migrations}"
+exec node /usr/lib/supacode-linux/supacode-linux.mjs "$@"
