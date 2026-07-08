@@ -35,3 +35,5 @@ jobs:
         run: make linux-ui-check
       - name: Packaging metadata
         run: make linux-package-check
+      - name: Debian package
+        run: make linux-build-deb VERSION=0.1.0

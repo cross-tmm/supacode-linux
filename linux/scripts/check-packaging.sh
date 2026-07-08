@@ -13,6 +13,7 @@ required_files=(
   "$root/linux/packaging/appimage/agent-workbench.desktop"
   "$root/linux/packaging/appimage/AppRun"
   "$root/linux/src/app/agent-workbench.gjs"
+  "$root/linux/scripts/build-deb.sh"
 )
 
 for file in "${required_files[@]}"; do
@@ -26,5 +27,6 @@ bash -n "$root/linux/packaging/debian/rules"
 bash -n "$root/linux/packaging/bin/agent-workbench"
 bash -n "$root/linux/packaging/bin/supacode-linux"
 bash -n "$root/linux/packaging/appimage/AppRun"
+bash -n "$root/linux/scripts/build-deb.sh"
 
 echo "Linux packaging metadata is present"

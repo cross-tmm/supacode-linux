@@ -296,6 +296,7 @@ make linux-doctor
 make linux-state-check
 make linux-test
 make linux-package-check
+make linux-build-deb
 make linux-ui-check
 ```
 
@@ -325,15 +326,34 @@ host exists.
 
 ## Packaging Status
 
-Current packaging files are metadata and install-layout scaffolding:
+Current packaging files include a buildable Debian package path plus metadata for Arch and
+AppImage:
 
 - `linux/packaging/debian/`
 - `linux/packaging/arch/PKGBUILD`
 - `linux/packaging/appimage/`
 
-They are not release-ready artifacts because the GTK host and app binary do not exist yet.
-Before release, package verification must install the app on clean Ubuntu and Arch images and run
-the same smoke flow used by `make linux-verify`.
+Build the local Debian package:
+
+```bash
+make linux-build-deb VERSION=0.1.0
+```
+
+The artifact is written to:
+
+```text
+build/linux/deb/agent-workbench_0.1.0_all.deb
+```
+
+Install it on Ubuntu 24.04+:
+
+```bash
+sudo apt install ./build/linux/deb/agent-workbench_0.1.0_all.deb
+```
+
+The Arch and AppImage files are not release-ready artifacts yet. Before release, package
+verification must install the app on clean Ubuntu and Arch images and run the same smoke flow used
+by `make linux-verify`.
 
 ## UI/UX Acceptance Gate
 
