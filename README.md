@@ -17,6 +17,10 @@ slice is a runnable Node + SQLite core for repository/worktree state and distro 
 metadata; the GUI/terminal host is designed to plug into Ghostty's GTK frontend rather than
 reimplement terminal behavior in Electron.
 
+The Linux target is not UI/UX or feature-parity complete yet. See
+[`linux/FEATURE_PARITY.md`](linux/FEATURE_PARITY.md) for the parity gate and
+[`linux/README.md`](linux/README.md) for setup, installation, and verification steps.
+
 ## Features
 
 ### Worktree-first workflow

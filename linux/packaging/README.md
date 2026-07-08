@@ -3,6 +3,9 @@
 Packaging is intentionally thin until the GTK/Ghostty host lands. The current package installs
 the Linux core CLI, SQLite migrations, and desktop metadata.
 
+Run `make linux-package-check` before committing packaging changes. Full package smoke tests will
+be added once the GTK/Ghostty host produces a real app binary.
+
 ## Ubuntu/Debian
 
 The Debian metadata declares runtime dependencies on `git`, `gh`, `nodejs`, and `sqlite3`.
