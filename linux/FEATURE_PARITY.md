@@ -15,7 +15,7 @@ Status values:
 | Git worktrees | Discover, create, archive, pin, delete, sort | Core only | Sidebar controls for create/archive/pin/delete/sort |
 | Terminal engine | Embedded Ghostty terminal | Missing | GTK host embeds Ghostty/libghostty |
 | Tabs and splits | Per-worktree tabs, surfaces, split panes | Core only | Visual tab/split UI and persistence |
-| zmx sessions | Background persistence and reattach | Missing | zmx attach/reattach, cleanup, crash recovery |
+| zmx sessions | Background persistence and reattach | Core only | GTK/Ghostty attach, cleanup, crash recovery |
 | Agent presence | Live badges and attention state | Core only | Hook events update visible badges in real time |
 | Agent integrations | Managed hooks for all supported agents | Core only | Auto-install and cover all Swift-supported agents with preview/install/uninstall |
 | Notifications | In-app and system notifications with sound | Missing | Notification center, sound, click-to-focus |

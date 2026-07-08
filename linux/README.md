@@ -18,7 +18,8 @@ terminal host.
 - Repository registration and listing.
 - Git worktree discovery and creation.
 - SSH-backed remote repository registration and worktree discovery/creation.
-- Terminal tab/surface ID allocation, layout snapshot persistence, listing, and closure.
+- Terminal tab/surface ID allocation, zmx-first launch planning with shell fallback, layout
+  snapshot persistence, listing, and closure.
 - Auto-installed managed hooks with preview/status/install/uninstall for Codex and Copilot.
 - Durable agent hook event capture in SQLite.
 - GitHub PR/check state normalization through `gh`.
@@ -31,7 +32,7 @@ terminal host.
 These are required before claiming "no feature difference" with the Swift app:
 
 - Embedded Ghostty terminal surfaces.
-- zmx-backed live session attach/reattach.
+- Embedded zmx-backed live session attach/reattach in the GTK/Ghostty host.
 - Sidebar UI, tab strip, split panes, search UI, command palette, settings window, and menus.
 - System notifications and sounds.
 - Remote SSH repository UI and zmx session transport.
@@ -59,7 +60,8 @@ Future GTK host requirements:
 - GTK4 development package.
 - libadwaita development package.
 - Ghostty/libghostty build dependencies.
-- zmx when persistent sessions are enabled.
+- zmx when persistent sessions are enabled. Without it, terminal launch plans degrade to shell
+  mode.
 
 Ubuntu:
 
@@ -191,6 +193,22 @@ SUPACODE_SURFACE_ID
 
 Those IDs are how agent hooks route events back to the correct surface.
 
+`terminal create` also persists a launch plan. The planner prefers zmx when `zmx` is on `PATH` or
+`AGENT_WORKBENCH_ZMX` points at an executable. If zmx is missing, it records a degraded shell plan
+instead of failing:
+
+```json
+{
+  "backend": "shell",
+  "degraded": true,
+  "reason": "zmx not found; session will not survive app quit"
+}
+```
+
+Remote worktree surfaces use SSH command lines with connection multiplexing. When local zmx is
+available, the local surface wraps the SSH command in `zmx attach`; the remote command also tries
+host-side `zmx attach` and falls back to the host shell when zmx is unavailable there.
+
 ## Agent Hooks
 
 Supported today:
@@ -287,7 +305,7 @@ What this verifies:
 - SQLite migrations apply from scratch.
 - Repository/worktree flows work against a temporary Git repository.
 - Remote SSH repository/worktree flows work through an SSH command shim.
-- Terminal layout state is persisted.
+- Terminal launch plans and layout state are persisted.
 - Codex and Copilot hook safety behavior works.
 - GitHub PR/check normalization works.
 - Packaging metadata is present and shell launchers parse.
@@ -298,7 +316,7 @@ What this does not verify yet:
 
 - Full UI/UX parity.
 - Embedded terminal rendering.
-- Local and remote zmx session attach/reattach.
+- Embedded local and remote zmx attach/reattach in the GTK/Ghostty host.
 - Desktop notifications.
 - Real distro package installation.
 

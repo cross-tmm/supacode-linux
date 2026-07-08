@@ -24,6 +24,7 @@ package() {
   install -Dm644 "linux/src/supacode-linux.mjs" "$pkgdir/usr/lib/supacode-linux/supacode-linux.mjs"
   install -Dm644 "linux/src/utils.mjs" "$pkgdir/usr/lib/supacode-linux/utils.mjs"
   install -Dm644 "linux/src/remote-git.mjs" "$pkgdir/usr/lib/supacode-linux/remote-git.mjs"
+  install -Dm644 "linux/src/terminal-launch.mjs" "$pkgdir/usr/lib/supacode-linux/terminal-launch.mjs"
   install -Dm644 "linux/src/agent-integrations.mjs" "$pkgdir/usr/lib/supacode-linux/agent-integrations.mjs"
   install -Dm644 "linux/src/github-status.mjs" "$pkgdir/usr/lib/supacode-linux/github-status.mjs"
   install -Dm644 "linux/state/migrations/0001_initial.sql" \
@@ -34,6 +35,8 @@ package() {
     "$pkgdir/usr/share/supacode-linux/state/migrations/0003_terminal_launch_state.sql"
   install -Dm644 "linux/state/migrations/0004_github_pull_requests.sql" \
     "$pkgdir/usr/share/supacode-linux/state/migrations/0004_github_pull_requests.sql"
+  install -Dm644 "linux/state/migrations/0005_terminal_launch_plan.sql" \
+    "$pkgdir/usr/share/supacode-linux/state/migrations/0005_terminal_launch_plan.sql"
   install -Dm644 "linux/packaging/appimage/agent-workbench.desktop" \
     "$pkgdir/usr/share/applications/agent-workbench.desktop"
   install -Dm644 "LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

@@ -13,6 +13,7 @@ import {
 } from "./agent-integrations.mjs";
 import { normalizePullRequest, pullRequestFields } from "./github-status.mjs";
 import { remoteGitSSHArgs } from "./remote-git.mjs";
+import { findZmxExecutable, resolveTerminalLaunch } from "./terminal-launch.mjs";
 import { spawnFile, spawnFileJSON, sqlString } from "./utils.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
@@ -240,8 +241,15 @@ async function createTerminal(argv, dbPath) {
   const tabID = randomUUID();
   const surfaceID = randomUUID();
   const title = options.title ?? worktree.branchName ?? basename(worktree.workingDirectory);
-  const cwd = resolve(options.cwd ?? worktree.workingDirectory);
+  const cwd = cwdForWorktree(worktree, options.cwd);
   const launchCommand = options.command ?? null;
+  const launch = resolveTerminalLaunch({
+    surfaceID,
+    worktree,
+    cwd,
+    command: launchCommand,
+    zmxPath: findZmxExecutable(),
+  });
   await execSQL(
     dbPath,
     `INSERT INTO terminal_tabs(id, worktree_id, title, sort_order, selected_surface_id)
@@ -249,9 +257,13 @@ async function createTerminal(argv, dbPath) {
   );
   await execSQL(
     dbPath,
-    `INSERT INTO terminal_surfaces(id, tab_id, worktree_id, title, working_directory, launch_command, task_status)
-     VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(title)},
-             ${sqlString(cwd)}, ${sqlString(launchCommand)}, 'idle');`
+    `INSERT INTO terminal_surfaces(
+       id, tab_id, worktree_id, zmx_session_id, title, working_directory,
+       launch_command, launch_backend, launch_plan_json, task_status
+     )
+     VALUES (${sqlString(surfaceID)}, ${sqlString(tabID)}, ${sqlString(worktree.id)}, ${sqlString(launch.zmxSessionID)},
+             ${sqlString(title)}, ${sqlString(cwd)}, ${sqlString(launchCommand)},
+             ${sqlString(launch.backend)}, ${sqlString(JSON.stringify(launch))}, 'idle');`
   );
   await saveLayoutSnapshot(dbPath, worktree.id);
   console.log(
@@ -259,6 +271,8 @@ async function createTerminal(argv, dbPath) {
       worktreeID: worktree.id,
       tabID,
       surfaceID,
+      zmxSessionID: launch.zmxSessionID,
+      launch,
       env: {
         SUPACODE_WORKTREE_ID: worktree.id,
         SUPACODE_TAB_ID: tabID,
@@ -277,13 +291,15 @@ async function listTerminals(argv, dbPath) {
     dbPath,
     `SELECT s.id AS surfaceID, s.tab_id AS tabID, s.worktree_id AS worktreeID,
             s.title, s.working_directory AS workingDirectory,
+            s.zmx_session_id AS zmxSessionID, s.launch_backend AS launchBackend,
+            s.launch_plan_json AS launchPlanJSON,
             s.launch_command AS launchCommand, s.task_status AS taskStatus,
             s.is_closed AS isClosed, s.created_at AS createdAt, s.updated_at AS updatedAt
        FROM terminal_surfaces s
        ${where}
       ORDER BY s.is_closed, s.updated_at DESC, s.created_at DESC;`
   );
-  console.log(JSON.stringify(rows, null, 2));
+  console.log(JSON.stringify(rows.map(parseLaunchPlan), null, 2));
 }
 
 async function closeTerminal(argv, dbPath) {
@@ -614,9 +630,12 @@ async function resolveRepo(dbPath, rawRepo) {
 async function resolveWorktree(dbPath, rawWorktree) {
   const byID = await querySQL(
     dbPath,
-    `SELECT id, working_directory AS workingDirectory, branch_name AS branchName
-       FROM worktrees
-      WHERE id = ${sqlString(rawWorktree)}
+    `SELECT w.id, w.working_directory AS workingDirectory, w.branch_name AS branchName,
+            r.kind AS repositoryKind, r.root_path AS repositoryRootPath,
+            COALESCE(r.remote_host, '') AS remoteHost
+       FROM worktrees w
+       JOIN repositories r ON r.id = w.repository_id
+      WHERE w.id = ${sqlString(rawWorktree)}
       LIMIT 1;`
   );
   if (byID.length === 1) {
@@ -626,9 +645,12 @@ async function resolveWorktree(dbPath, rawWorktree) {
   const path = resolve(rawWorktree);
   const byPath = await querySQL(
     dbPath,
-    `SELECT id, working_directory AS workingDirectory, branch_name AS branchName
-       FROM worktrees
-      WHERE working_directory = ${sqlString(path)}
+    `SELECT w.id, w.working_directory AS workingDirectory, w.branch_name AS branchName,
+            r.kind AS repositoryKind, r.root_path AS repositoryRootPath,
+            COALESCE(r.remote_host, '') AS remoteHost
+       FROM worktrees w
+       JOIN repositories r ON r.id = w.repository_id
+      WHERE w.working_directory = ${sqlString(path)}
       LIMIT 1;`
   );
   if (byPath.length === 1) {
@@ -723,6 +745,9 @@ async function saveLayoutSnapshot(dbPath, worktreeID) {
             t.selected_surface_id AS selectedSurfaceID,
             s.id AS surfaceID, s.title AS surfaceTitle,
             s.working_directory AS workingDirectory,
+            s.zmx_session_id AS zmxSessionID,
+            s.launch_backend AS launchBackend,
+            s.launch_plan_json AS launchPlanJSON,
             s.launch_command AS launchCommand, s.task_status AS taskStatus,
             s.is_closed AS isClosed
        FROM terminal_tabs t
@@ -779,6 +804,17 @@ async function doctor() {
       results.push({ command, ok: false, error: error.message });
     }
   }
+  const zmx = findZmxExecutable();
+  results.push(
+    zmx
+      ? { command: "zmx", ok: true, optional: true, path: zmx }
+      : {
+          command: "zmx",
+          ok: false,
+          optional: true,
+          error: "Install zmx for persistent terminal sessions; shell fallback remains available",
+        }
+  );
   try {
     const gjs = await spawnFile("gjs", ["--version"]);
     results.push({ command: "gjs", ok: true, optional: true, version: gjs.trim() });
@@ -866,6 +902,21 @@ function worktreePathForRepo(repo, rawPath, name) {
     return join(dirname(repo.rootPath), safePathSegment(name));
   }
   return rawPath.startsWith("/") ? rawPath : join(dirname(repo.rootPath), rawPath);
+}
+
+function cwdForWorktree(worktree, rawCwd) {
+  if (worktree.repositoryKind !== "remote") {
+    return resolve(rawCwd ?? worktree.workingDirectory);
+  }
+  if (!rawCwd) {
+    return worktree.workingDirectory;
+  }
+  return rawCwd.startsWith("/") ? rawCwd : join(worktree.workingDirectory, rawCwd);
+}
+
+function parseLaunchPlan(row) {
+  const { launchPlanJSON, ...rest } = row;
+  return { ...rest, launchPlan: launchPlanJSON ? JSON.parse(launchPlanJSON) : {} };
 }
 
 function relativeDetail(repoPath, workingDirectory) {

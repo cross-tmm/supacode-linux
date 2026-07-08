@@ -5,7 +5,7 @@
 The Linux implementation is split into a headless core and a future GTK terminal host.
 
 - The core owns persistence, repository/worktree commands, settings IO, packageable CLI behavior,
-  terminal surface ID allocation, and layout snapshots.
+  terminal surface ID allocation, zmx/shell/SSH launch plans, and layout snapshots.
 - GitHub status is pulled through `gh` and normalized before being written to SQLite. The app
   never stores GitHub credentials.
 - The GTK host should own windows, sidebar rendering, command palette, terminal tabs/splits, and
@@ -19,7 +19,7 @@ SQLite owns high-churn state:
 
 - repositories and display ordering
 - worktrees, archived/pinned flags, and sort ordering
-- terminal tabs, surfaces, and layout snapshots
+- terminal tabs, surfaces, launch plans, and layout snapshots
 - notification read state
 - agent integration install/drift state
 

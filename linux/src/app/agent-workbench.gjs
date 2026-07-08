@@ -158,7 +158,11 @@ const WorkbenchWindow = GObject.registerClass(
         row(worktree.branchName || worktree.workingDirectory, worktree.detail || worktree.workingDirectory, "vcs-branch-symbolic")
       );
       fillList(this.terminalList, this.terminals, (terminal) =>
-        row(terminal.title || terminal.surfaceID, terminal.workingDirectory || terminal.surfaceID, "utilities-terminal-symbolic")
+        row(
+          terminal.title || terminal.surfaceID,
+          `${terminal.launchBackend || "shell"} - ${terminal.workingDirectory || terminal.surfaceID}`,
+          "utilities-terminal-symbolic"
+        )
       );
       fillList(this.agentList, this.agents, (agent) =>
         row(agent.agent, agent.error || agent.state, agent.state === "installed" ? "emblem-ok-symbolic" : "dialog-warning-symbolic")

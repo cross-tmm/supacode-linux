@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { normalizePullRequest } from "../src/github-status.mjs";
 import { remoteGitCommand } from "../src/remote-git.mjs";
+import { resolveTerminalLaunch, zmxSessionID } from "../src/terminal-launch.mjs";
 import { shellQuote, spawnFile, spawnFileJSON } from "../src/utils.mjs";
 
 const cli = join(import.meta.dirname, "../src/supacode-linux.mjs");
@@ -64,6 +65,44 @@ test("quotes remote git commands for SSH", () => {
     remoteGitCommand("/srv/repo path", ["worktree", "add", "/srv/wt path", "-b", "feature/with space"]),
     "git -C '/srv/repo path' worktree add '/srv/wt path' -b 'feature/with space'"
   );
+});
+
+test("plans zmx terminal launches with shell fallback", () => {
+  const surfaceID = "11111111-2222-3333-4444-555555555555";
+  assert.equal(zmxSessionID(surfaceID), "supa-11111111-2222-3333-4444-555555555555");
+
+  const fallback = resolveTerminalLaunch({
+    surfaceID,
+    worktree: { repositoryKind: "local" },
+    cwd: "/repo",
+    command: null,
+    zmxPath: null,
+  });
+  assert.equal(fallback.backend, "shell");
+  assert.equal(fallback.degraded, true);
+  assert.equal(fallback.zmxSessionID, null);
+
+  const zmx = resolveTerminalLaunch({
+    surfaceID,
+    worktree: { repositoryKind: "local" },
+    cwd: "/repo",
+    command: null,
+    zmxPath: "/usr/bin/zmx",
+  });
+  assert.equal(zmx.backend, "zmx");
+  assert.deepEqual(zmx.commandWrapper, ["/usr/bin/zmx", "attach", "supa-11111111-2222-3333-4444-555555555555"]);
+
+  const remote = resolveTerminalLaunch({
+    surfaceID,
+    worktree: { repositoryKind: "remote", remoteHost: "dev.example.invalid" },
+    cwd: "/srv/repo",
+    command: "codex",
+    zmxPath: "/usr/bin/zmx",
+  });
+  assert.equal(remote.backend, "zmx");
+  assert.equal(remote.remoteHost, "dev.example.invalid");
+  assert.match(remote.command, /zmx' attach supa-11111111-2222-3333-4444-555555555555/);
+  assert.match(remote.command, /ssh/);
 });
 
 test("previews, installs, tracks, and uninstalls managed Copilot hooks", async () => {
@@ -213,27 +252,36 @@ test("registers a git repository and creates a worktree", async () => {
     assert.equal(worktrees.length, 2);
     assert.ok(worktrees.some((worktree) => worktree.branchName === "feature/linux-core"));
 
-    const createdTerminal = await spawnFileJSON("node", [
-      cli,
-      "--db",
-      db,
-      "terminal",
-      "create",
-      "--worktree",
-      worktreePath,
-      "--title",
-      "Feature task",
-      "--command",
-      "codex",
-    ]);
+    const noZmxEnv = { ...process.env, AGENT_WORKBENCH_ZMX: join(dir, "missing-zmx") };
+    const createdTerminal = await spawnFileJSON(
+      "node",
+      [
+        cli,
+        "--db",
+        db,
+        "terminal",
+        "create",
+        "--worktree",
+        worktreePath,
+        "--title",
+        "Feature task",
+        "--command",
+        "codex",
+      ],
+      { env: noZmxEnv }
+    );
     assert.equal(createdTerminal.env.SUPACODE_WORKTREE_ID.includes("worktree:"), true);
     assert.equal(createdTerminal.env.SUPACODE_TAB_ID, createdTerminal.tabID);
     assert.equal(createdTerminal.env.SUPACODE_SURFACE_ID, createdTerminal.surfaceID);
+    assert.equal(createdTerminal.launch.backend, "shell");
+    assert.equal(createdTerminal.launch.degraded, true);
 
     const terminals = await spawnFileJSON("node", [cli, "--db", db, "terminal", "list", "--worktree", worktreePath]);
     assert.equal(terminals.length, 1);
     assert.equal(terminals[0].title, "Feature task");
     assert.equal(terminals[0].launchCommand, "codex");
+    assert.equal(terminals[0].launchBackend, "shell");
+    assert.equal(terminals[0].launchPlan.backend, "shell");
 
     const closed = await spawnFileJSON("node", [
       cli,
@@ -269,7 +317,7 @@ test("registers an SSH repository and creates a remote worktree", async () => {
     const fakeSSH = join(fakeBin, "ssh");
     writeFileSync(fakeSSH, '#!/usr/bin/env bash\nset -euo pipefail\ncommand="${@: -1}"\nexec bash -lc "$command"\n');
     chmodSync(fakeSSH, 0o755);
-    const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}` };
+    const env = { ...process.env, PATH: `${fakeBin}:${process.env.PATH ?? ""}`, SHELL: "/bin/bash" };
 
     const added = await spawnFileJSON(
       "node",

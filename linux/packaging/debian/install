@@ -4,6 +4,7 @@ linux/src/app/agent-workbench.gjs usr/lib/agent-workbench/app/
 linux/src/supacode-linux.mjs usr/lib/supacode-linux/
 linux/src/utils.mjs usr/lib/supacode-linux/
 linux/src/remote-git.mjs usr/lib/supacode-linux/
+linux/src/terminal-launch.mjs usr/lib/supacode-linux/
 linux/src/agent-integrations.mjs usr/lib/supacode-linux/
 linux/src/github-status.mjs usr/lib/supacode-linux/
 linux/state/migrations usr/share/supacode-linux/state/
